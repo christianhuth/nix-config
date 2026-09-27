@@ -33,6 +33,9 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/kubeswitch.nix` | kubeswitch and its shell function                                     | `christianhuth` |
 | `home/krew.nix`       | krew and its plugins                                                  | `christianhuth` |
 | `home/vscodium.nix`   | VSCodium and its extensions                                           | `christianhuth` |
+| `pkgs/overlay.nix`    | our own packages and overrides, applied on top of nixpkgs             | both layers     |
+| `pkgs/termius/…`      | Termius built from the vendor's official `.deb`                       | `christianhuth` |
+| `system/apparmor/termius` | AppArmor profile letting Termius create user namespaces               | all users       |
 | `BOOTSTRAP.md`        | one-time setup of Nix itself                                          | —               |
 
 ### Where are the per-user packages?
@@ -235,6 +238,23 @@ file (`collision between ...`). If that happens, add this to
 ignoreCollisions = true;
 ```
 
+**`MESA-LOADER: failed to open dri: /run/opengl-driver/lib/...`.** Nix-built
+graphics applications look for GPU drivers under `/run/opengl-driver`, a path
+that only exists on NixOS. Without it Mesa falls back to software rendering, so
+this affects every GUI app here, not just one.
+
+`targets.genericLinux.gpu` is already enabled (it defaults to on whenever
+`targets.genericLinux.enable` is set), and it puts a helper in the profile. Home
+Manager cannot write to `/etc` off NixOS, so run it once as root:
+
+```bash
+sudo ~/.nix-profile/bin/non-nixos-gpu-setup
+```
+
+It installs `/etc/tmpfiles.d/non-nixos-gpu.conf`, which symlinks
+`/run/opengl-driver` at the host's GPU libraries, and registers a GC root. Re-run
+it after an update that rebuilds the helper.
+
 **Applications missing from the menu.** Log out and back in. `XDG_DATA_DIRS`
 has to contain the profiles' `share` directories, and the desktop session only
 picks that up at login.
@@ -343,6 +363,93 @@ Two things worth knowing:
   is where kubeconfig stores are configured (filesystem paths, Gardener, Cluster
   API, Vault and so on). It is left empty for now, so kubeswitch uses its
   defaults.
+
+## Own packages: Termius from the official .deb
+
+`pkgs.termius` in nixpkgs does not build Termius from source — it repackages
+the **Snap Store** artifact, downloading a `.snap` from `api.snapcraft.io` and
+running `unsquashfs` on it. The revision pinned in nixpkgs 26.05 is 9.36.2,
+several releases behind, so using it would have meant a downgrade.
+
+Termius does publish an official `.deb`, so `pkgs/termius/package.nix` builds
+from that instead and `pkgs/overlay.nix` substitutes it for the nixpkgs
+package. Everything else keeps referring to plain `termius`.
+
+| Source | Version |
+|---|---|
+| nixpkgs 26.05 (snap-based) | 9.36.2 |
+| Snap Store | 9.43.1 |
+| official `.deb` — what we build | **10.1.0** |
+
+The `.deb` is unpacked with `dpkg-deb -x`; `autoPatchelfHook` then rewrites the
+interpreter and RPATHs of its 24 bundled ELF files. `buildInputs` is exactly
+the set of external `DT_NEEDED` entries those files carry, minus what stdenv
+already provides. `wrapGAppsHook3` supplies the GSettings schemas, the
+GDK-Pixbuf loader cache and dconf that any GTK application needs.
+
+### Making it start on Ubuntu
+
+Two root steps are needed once, and neither can be done from Nix because both
+write outside `/nix` — this is the "no system-level management" limitation from
+the table at the top, in practice.
+
+**1. The Chromium sandbox.** Ubuntu sets
+`kernel.apparmor_restrict_unprivileged_userns = 1`, which stops unconfined
+binaries from creating user namespaces. Electron needs them for its sandbox.
+The older SUID sandbox is not an alternative: `chrome-sandbox` would have to be
+root-owned with mode 4755, and nothing in `/nix/store` can be setuid. Termius
+therefore aborts at startup instead of running unsandboxed:
+
+```
+FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox
+helper binary was found, but is not configured correctly.
+```
+
+`system/apparmor/termius` fixes that the way Ubuntu fixes it for Chrome, Brave
+and Discord — a profile that grants `userns` and leaves the program otherwise
+unconfined, so the sandbox keeps working:
+
+```bash
+sudo install -Dm644 system/apparmor/termius /etc/apparmor.d/termius
+sudo apparmor_parser -r /etc/apparmor.d/termius
+```
+
+The attachment path is globbed (`/nix/store/*-termius-*/opt/Termius/termius-app`),
+so the profile survives rebuilds and version bumps.
+
+The alternative is adding `--no-sandbox` to the wrapper in
+`pkgs/termius/package.nix`. That works without root but switches off a real
+security boundary in a program that holds SSH credentials, so the profile is
+the better trade.
+
+**2. GPU drivers.** See the `MESA-LOADER` entry under Pitfalls —
+`sudo ~/.nix-profile/bin/non-nixos-gpu-setup`. Without it Termius still runs,
+just on software rendering.
+
+### Updating it
+
+This is the price of leaving nixpkgs: **no automatic updates.** Termius ships an
+electron-updater manifest that hands over both values needed:
+
+```bash
+curl -s https://autoupdate.termius.com/linux/latest-linux.yml
+```
+
+```yaml
+version: 10.1.0
+path: termius-app_10.1.0_amd64.deb
+sha512: mABJip003+zApFtqczR0f+IcF85vLMqWzqnQeoiZEXVGtjkM1MsH+kvLYXEn09XiBAseFiyQyUW8AI/b607wQQ==
+```
+
+That `sha512` is base64-encoded, which is exactly Nix's SRI format — prefix it
+with `sha512-` and it goes straight into the derivation. So an update means:
+copy `version` and the prefixed hash into `pkgs/termius/package.nix`, then
+
+```bash
+nix build .#termius && ./result/bin/termius-app
+```
+
+`termius` is exposed as a flake output for that purpose.
 
 ## Can Nix manage users?
 

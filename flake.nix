@@ -23,6 +23,9 @@
       pkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
+
+        # Our own packages and overrides -- see pkgs/overlay.nix.
+        overlays = [ (import ./pkgs/overlay.nix) ];
       };
 
       systemPackages = import ./system/packages.nix { inherit pkgs; };
@@ -34,6 +37,10 @@
       packages.${system} = {
         system-packages = systemPackages;
         default = systemPackages;
+
+        # Exposed so it can be built and tested on its own, which is handy
+        # after a version bump:  nix build .#termius && ./result/bin/termius-app
+        inherit (pkgs) termius;
       };
 
       # === Layer 2: for this user only ==================================

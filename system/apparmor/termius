@@ -1,0 +1,29 @@
+# AppArmor profile for Termius installed from the Nix store.
+#
+# Why this is needed: Ubuntu sets
+#   kernel.apparmor_restrict_unprivileged_userns = 1
+# which forbids unconfined binaries from creating user namespaces. Chromium --
+# and therefore Electron, and therefore Termius -- needs them for its sandbox.
+# The SUID sandbox is not an option either: chrome-sandbox would have to be
+# owned by root with mode 4755, and nothing in /nix/store can be setuid.
+# Without this profile Termius aborts at startup rather than run unsandboxed.
+#
+# This mirrors Ubuntu's own profiles for Chromium-based applications
+# (/etc/apparmor.d/chrome, .../Discord, .../brave): grant `userns` and leave
+# the program otherwise unconfined. The sandbox stays intact.
+#
+# The glob matches any store path, so the profile survives rebuilds.
+#
+# Install (needs root; see README.md):
+#   sudo install -Dm644 system/apparmor/termius /etc/apparmor.d/termius
+#   sudo apparmor_parser -r /etc/apparmor.d/termius
+
+abi <abi/5.0>,
+
+include <tunables/global>
+
+profile termius /nix/store/*-termius-*/opt/Termius/termius-app flags=(unconfined) {
+  userns,
+
+  include if exists <local/termius>
+}

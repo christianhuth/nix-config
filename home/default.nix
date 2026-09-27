@@ -43,6 +43,11 @@
     signal-desktop
     teams-for-linux # Microsoft discontinued the official Linux client
 
+    # Built from the vendor's official .deb, not from nixpkgs' snap-based
+    # package -- see pkgs/termius/package.nix for why. unfree; the binary is
+    # called `termius-app`, not `termius`.
+    termius
+
     # --- Network / VPN --------------------------------------------------
     wireguard-tools # provides `wg` and `wg-quick` (tunnels still need sudo)
     netbird
