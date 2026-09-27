@@ -35,7 +35,7 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/vscodium.nix`   | VSCodium and its extensions                                           | `christianhuth` |
 | `pkgs/overlay.nix`    | our own packages and overrides, applied on top of nixpkgs             | both layers     |
 | `pkgs/termius/…`      | Termius built from the vendor's official `.deb`                       | `christianhuth` |
-| `system/apparmor/termius` | AppArmor profile letting Termius create user namespaces               | all users       |
+| `system/apparmor/…`   | AppArmor profiles granting `userns` (see “Electron on Ubuntu”)        | all users       |
 | `BOOTSTRAP.md`        | one-time setup of Nix itself                                          | —               |
 
 ### Where are the per-user packages?
@@ -389,42 +389,24 @@ GDK-Pixbuf loader cache and dconf that any GTK application needs.
 
 ### Making it start on Ubuntu
 
-Two root steps are needed once, and neither can be done from Nix because both
-write outside `/nix` — this is the "no system-level management" limitation from
-the table at the top, in practice.
-
-**1. The Chromium sandbox.** Ubuntu sets
-`kernel.apparmor_restrict_unprivileged_userns = 1`, which stops unconfined
-binaries from creating user namespaces. Electron needs them for its sandbox.
-The older SUID sandbox is not an alternative: `chrome-sandbox` would have to be
-root-owned with mode 4755, and nothing in `/nix/store` can be setuid. Termius
-therefore aborts at startup instead of running unsandboxed:
+Termius needs the two root steps that apply to every Electron app here — the
+AppArmor profile from **Electron applications on Ubuntu** below, plus the GPU
+setup from the `MESA-LOADER` entry under Pitfalls. Without the profile it aborts
+at startup:
 
 ```
 FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox
 helper binary was found, but is not configured correctly.
 ```
 
-`system/apparmor/termius` fixes that the way Ubuntu fixes it for Chrome, Brave
-and Discord — a profile that grants `userns` and leaves the program otherwise
-unconfined, so the sandbox keeps working:
+Termius gets its own profile (`system/apparmor/termius`) rather than being
+covered by the shared one, because the vendor `.deb` bundles its own Electron at
+`opt/Termius/termius-app` instead of using nixpkgs'.
 
-```bash
-sudo install -Dm644 system/apparmor/termius /etc/apparmor.d/termius
-sudo apparmor_parser -r /etc/apparmor.d/termius
-```
-
-The attachment path is globbed (`/nix/store/*-termius-*/opt/Termius/termius-app`),
-so the profile survives rebuilds and version bumps.
-
-The alternative is adding `--no-sandbox` to the wrapper in
-`pkgs/termius/package.nix`. That works without root but switches off a real
-security boundary in a program that holds SSH credentials, so the profile is
-the better trade.
-
-**2. GPU drivers.** See the `MESA-LOADER` entry under Pitfalls —
-`sudo ~/.nix-profile/bin/non-nixos-gpu-setup`. Without it Termius still runs,
-just on software rendering.
+The alternative would be adding `--no-sandbox` to the wrapper in
+`pkgs/termius/package.nix`. That needs no root but switches off a real security
+boundary in a program holding SSH credentials, so the profile is the better
+trade.
 
 ### Updating it
 
@@ -450,6 +432,53 @@ nix build .#termius && ./result/bin/termius-app
 ```
 
 `termius` is exposed as a flake output for that purpose.
+
+## Mixing channels: Signal from unstable
+
+`flake.nix` pulls in a second input, `nixpkgs-unstable`, and `pkgs/overlay.nix`
+takes exactly one package from it.
+
+The reason is specific to Signal: **Signal Desktop expires.** Roughly 90 days
+after its build date it refuses to start, and a stable-channel pin therefore
+does not merely mean older features, it means the program eventually stops
+working with no way around it but an update. Stable had 8.25.0, unstable has
+8.26.0.
+
+Be aware this is still not the newest release — upstream was at 8.28.0 — so
+`nix flake update` is not optional here, it is maintenance. If Signal ever
+refuses to start, that is the first thing to run.
+
+Mixing channels has a cost worth knowing: the unstable package set brings its
+own dependency closure, so you pay disk and download for a second copy of much
+of the graph. Take single packages from it, not whole categories.
+
+## Electron applications on Ubuntu
+
+Every Electron app installed through Nix hits the same wall on Ubuntu 24.04 and
+later, because Ubuntu sets `kernel.apparmor_restrict_unprivileged_userns = 1`:
+unconfined binaries may not create user namespaces, which is what Chromium's
+sandbox needs. The older SUID sandbox is no fallback either, since nothing in
+`/nix/store` can be setuid. The app aborts rather than run unsandboxed.
+
+Two profiles handle this, both following Ubuntu's own pattern for Chromium-based
+programs — grant `userns`, leave the program otherwise unconfined, keep the
+sandbox intact:
+
+| Profile | Attaches to | Covers |
+|---|---|---|
+| `system/apparmor/nix-electron` | `…-electron-unwrapped-*/libexec/electron/electron` | every app using nixpkgs' Electron (Signal) |
+| `system/apparmor/termius` | `…-termius-*/opt/Termius/termius-app` | Termius, which bundles its own Electron |
+
+```bash
+sudo install -Dm644 system/apparmor/nix-electron /etc/apparmor.d/nix-electron
+sudo install -Dm644 system/apparmor/termius      /etc/apparmor.d/termius
+sudo apparmor_parser -r /etc/apparmor.d/nix-electron
+sudo apparmor_parser -r /etc/apparmor.d/termius
+```
+
+Both attachment paths are globbed, so they survive rebuilds and version bumps
+and only need installing once. On NixOS this would be `security.wrappers`
+instead, in the configuration proper.
 
 ## Can Nix manage users?
 

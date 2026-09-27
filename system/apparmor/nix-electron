@@ -1,0 +1,34 @@
+# AppArmor profile for Electron applications installed from the Nix store.
+#
+# Same cause as system/apparmor/termius: Ubuntu sets
+#   kernel.apparmor_restrict_unprivileged_userns = 1
+# so unconfined binaries cannot create user namespaces, which Chromium needs
+# for its sandbox. The SUID fallback is unavailable too -- nixpkgs' electron
+# ships libexec/electron/chrome-sandbox as r-xr-xr-x, and nothing in the store
+# can be setuid.
+#
+# This profile attaches to nixpkgs' electron binary rather than to a single
+# application, so it covers every Electron app installed through Nix at once
+# (currently Signal). Termius has its own profile because it bundles its own
+# Electron inside the vendor .deb instead of using nixpkgs'.
+#
+# Modelled on Ubuntu's profiles for Chromium-based applications
+# (/etc/apparmor.d/chrome, .../Discord): grant `userns`, leave the program
+# otherwise unconfined. The sandbox itself stays active.
+#
+# The glob matches any store path and any Electron version, so this survives
+# rebuilds and upgrades.
+#
+# Install (needs root; see README.md):
+#   sudo install -Dm644 system/apparmor/nix-electron /etc/apparmor.d/nix-electron
+#   sudo apparmor_parser -r /etc/apparmor.d/nix-electron
+
+abi <abi/5.0>,
+
+include <tunables/global>
+
+profile nix-electron /nix/store/*-electron-unwrapped-*/libexec/electron/electron flags=(unconfined) {
+  userns,
+
+  include if exists <local/nix-electron>
+}
