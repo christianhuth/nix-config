@@ -14,6 +14,7 @@
 
 {
   imports = [
+    ./atuin.nix # atuin shell history (needs bash.nix for its integration)
     ./bash.nix # bash itself + ~/.bashrc, ~/.profile, ~/.bash_profile
     ./git.nix # git + its configuration
     ./gnupg.nix # pass, gnupg, and GPG_TTY

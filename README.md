@@ -28,6 +28,7 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `flake.nix`           | inputs (nixpkgs, Home Manager) and both outputs                       | —               |
 | `system/packages.nix` | system-wide packages, plus the Firefox pref                           | all users       |
 | `home/default.nix`    | **the per-user package list** (`home.packages`) and the imports below | `christianhuth` |
+| `home/atuin.nix`      | atuin shell history, local only                                       | `christianhuth` |
 | `home/bash.nix`       | bash, and the generated `~/.bashrc`, `~/.profile`, `~/.bash_profile`  | `christianhuth` |
 | `home/git.nix`        | git and its configuration                                             | `christianhuth` |
 | `home/gnupg.nix`      | pass, gnupg, and the GPG_TTY export                                   | `christianhuth` |
@@ -669,6 +670,58 @@ Worth knowing for later: `programs.password-store` is a Home Manager module for
 declarative settings such as `PASSWORD_STORE_DIR`, and extensions live under
 `passExtensions` (`pass-otp`, `pass-import`, …), added through
 `pass.withExtensions`.
+
+## atuin
+
+Shell history in SQLite instead of `~/.bash_history`, with a searchable UI on
+Ctrl-R. `home/atuin.nix` installs it and enables the bash integration, which
+sources nixpkgs' `bash-preexec` and evaluates `atuin init bash` from the
+generated `~/.bashrc` — so it depends on `home/bash.nix` owning that file.
+
+Kept local:
+
+```nix
+settings = {
+  auto_sync = false;      # no account, no server
+  update_check = false;   # Nix owns the version
+};
+```
+
+`auto_sync` changes nothing on its own, since sync needs `atuin login` anyway —
+it records the intent and stops a later login from quietly starting to upload
+history.
+
+### The `?` key
+
+Worth knowing about, because it is easy to miss: as of 18.15.2 the init script
+ends with an **unconditional**
+
+```bash
+bind -x '"?": _atuin_ai_question_mark'
+```
+
+and that widget runs `atuin ai inline` — a network service — whenever `?` is
+pressed at an empty prompt. A cloud feature bound to a bare punctuation key is
+the wrong default for a history tool meant to stay local, so it is disabled:
+
+```nix
+flags = [ "--disable-ai" ];
+```
+
+Verified: with the flag the binding is gone, without it it is present.
+
+Two further bindings are left as they are, because they are the point of atuin —
+Ctrl-R and Up Arrow both open its search. If the Up Arrow takeover ever gets in
+the way, `--disable-up-arrow` restores plain bash history, and
+`--disable-ctrl-r` does the same for reverse search.
+
+### Importing existing history
+
+The database starts empty; `~/.bash_history` is not read automatically. One-time:
+
+```bash
+atuin import auto
+```
 
 ## WireGuard via NetworkManager
 
