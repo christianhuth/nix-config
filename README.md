@@ -87,7 +87,7 @@ without, these are set:
 | Setting | Why |
 |---|---|
 | `push.autoSetupRemote = true` | pushing a new branch no longer needs `--set-upstream` |
-| `pull.rebase = true` | no accidental merge commits on pull (opinionated — `pull.ff = "only"` is the stricter alternative) |
+| `pull.rebase = false` | kept from the previous machine's setting; `true` (rebase on pull) or `pull.ff = "only"` are the alternatives |
 | `rebase.autoStash = true` | rebase works with a dirty working tree |
 | `fetch.prune = true` | drops local refs to branches deleted on the remote |
 | `merge.conflictStyle = "zdiff3"` | conflict markers also show the common ancestor |
@@ -583,6 +583,70 @@ target=work/gitlab
 
 Once that layout is settled, the file can be moved into the configuration as an
 `xdg.configFile` entry.
+
+### Two credential backends side by side
+
+GitHub is handled by `gh`, not by pass, because gh manages and refreshes its own
+OAuth token. That needs a reset, because git *accumulates* `credential.helper`
+values rather than replacing them:
+
+```nix
+credential."https://github.com".helper = [
+  ""                                        # clears the inherited list
+  "!${lib.getExe pkgs.gh} auth git-credential"
+];
+```
+
+Without the empty first element, pass-git-helper would still be asked for
+github.com first. Verified with `GIT_TRACE=1`:
+
+```
+# host=github.com
+run_command: '…/gh auth git-credential get'          <- only gh
+
+# host=gitlab.proact.eu
+run_command: 'pass-git-helper $@ get'                 <- only pass
+```
+
+Note `lib.getExe pkgs.gh` rather than a literal path. The previous machine had
+`/usr/bin/gh` hardcoded, which does not exist here at all since gh comes from
+Nix — that configuration would have failed silently.
+
+`gh` still needs `gh auth login` once; the helper cannot invent a token.
+
+### Per-directory identity
+
+The old `[includeIf "gitdir:~/code/proact/"] path = ~/.gitconfig-proact` became:
+
+```nix
+includes = [
+  {
+    condition = "gitdir:~/code/proact/";
+    contents.user = {
+      name = "Christian Huth";
+      email = "christian.huth@proact.eu";
+    };
+  }
+];
+```
+
+Using `contents` instead of `path` keeps the work identity in this repository:
+Home Manager generates the included file into the store and points `includeIf`
+at it, so there is no separate `~/.gitconfig-proact` to keep in sync.
+
+### Why the username had to be configured
+
+On the previous machine pass-git-helper returned only a password and that was
+enough, because the username was baked into the remote URL:
+
+```
+remote.origin.url  https://christian.huth@gitlab.proact.eu/paas/pass
+```
+
+git takes the username from there and asks the helper only for the password. The
+prompt therefore only appears when cloning a URL *without* a username — which
+is when it was noticed. `username_extractor = "static"` in the pass-git-helper
+mapping closes that gap, so both URL forms work.
 
 ### Initialising the store
 

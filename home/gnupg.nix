@@ -28,7 +28,22 @@ in
   # and applied with `home-manager switch`, not by editing ~/.config directly.
   xdg.configFile."pass-git-helper/git-pass-mapping.ini".source =
     ini.generate "git-pass-mapping.ini" {
-      "gitlab.proact.eu*".target = "proact/gitlab.proact.eu";
+      "gitlab.proact.eu*" = {
+        target = "proact/gitlab.proact.eu";
+
+        # Without this the helper returns only `password=`, and git has to ask
+        # for the username unless it happens to be in the clone URL. The
+        # `static` strategy takes the username straight from this mapping, which
+        # suits an entry that contains nothing but the token.
+        #
+        # The alternative is keeping the username in the store entry itself: add
+        # it as a second line and use the default `specific_line` extractor, or
+        # `regex_search` with `regex_username=^login: (.*)$` for a prefixed
+        # line. That keeps credential and identity together but needs a manual
+        # `pass edit` per entry instead of a line of Nix.
+        username_extractor = "static";
+        username = "christian.huth";
+      };
     };
 
   # Installs gnupg -- 2.4.9, which shadows Ubuntu's 2.4.8 because

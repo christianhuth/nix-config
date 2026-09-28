@@ -1,4 +1,4 @@
-{ ... }:
+{ lib, pkgs, ... }:
 
 {
   programs.git = {
@@ -30,10 +30,12 @@
       # Pushing a new branch no longer needs `--set-upstream` (git >= 2.37).
       push.autoSetupRemote = true;
 
-      # Rebase instead of merge on pull, so no accidental merge commits.
-      # Opinionated: `pull.ff = "only"` is the stricter alternative, which
-      # refuses the pull instead of rebasing and lets you decide.
-      pull.rebase = true;
+      # Kept as false to match the long-standing setting from the previous
+      # machine. This repository originally set `true` (rebase on pull, no
+      # accidental merge commits); `pull.ff = "only"` would be the stricter
+      # middle ground, refusing the pull instead of deciding for you. Changing
+      # it is a one-line edit -- but it should be a deliberate one.
+      pull.rebase = false;
 
       # Let rebase stash and restore a dirty working tree by itself.
       rebase.autoStash = true;
@@ -59,11 +61,48 @@
       # `!` tells git to run the value as a shell command. The tool itself is
       # installed in home/gnupg.nix, and it needs a host-to-entry mapping in
       # ~/.config/pass-git-helper/git-pass-mapping.ini -- see README.md.
-      credential.helper = "!pass-git-helper $@";
+      credential = {
+        helper = "!pass-git-helper $@";
+
+        # GitHub is handled by `gh` rather than pass, because gh manages and
+        # refreshes its own OAuth token.
+        #
+        # The empty first element is load-bearing: git accumulates
+        # credential.helper values into a list, so without resetting it here
+        # pass-git-helper would still be asked for github.com first. An empty
+        # value clears the inherited list for this URL.
+        #
+        # The old machine hardcoded /usr/bin/gh, which does not exist here --
+        # gh now comes from Nix. lib.getExe resolves to the store path, so this
+        # cannot silently break.
+        "https://github.com".helper = [
+          ""
+          "!${lib.getExe pkgs.gh} auth git-credential"
+        ];
+        "https://gist.github.com".helper = [
+          ""
+          "!${lib.getExe pkgs.gh} auth git-credential"
+        ];
+      };
 
       # --- Convenience ------------------------------------------------------
       # Show the full diff in the editor while writing the commit message.
       commit.verbose = true;
     };
+
+    # Conditional configuration, replacing the old
+    #   [includeIf "gitdir:~/code/proact/"] path = ~/.gitconfig-proact
+    # Using `contents` instead of `path` keeps the work identity in this
+    # repository; Home Manager generates the included file and points git at it,
+    # so there is no separate ~/.gitconfig-proact to maintain by hand.
+    includes = [
+      {
+        condition = "gitdir:~/code/proact/";
+        contents.user = {
+          name = "Christian Huth";
+          email = "christian.huth@proact.eu";
+        };
+      }
+    ];
   };
 }
