@@ -30,6 +30,8 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/default.nix`    | **the per-user package list** (`home.packages`) and the imports below | `christianhuth` |
 | `home/atuin.nix`      | atuin shell history, local only                                       | `christianhuth` |
 | `home/bash.nix`       | bash, and the generated `~/.bashrc`, `~/.profile`, `~/.bash_profile`  | `christianhuth` |
+| `home/code.nix`       | ~/code directory layout + the managed ansible .envrc                  | `christianhuth` |
+| `home/direnv.nix`     | direnv + nix-direnv                                                   | `christianhuth` |
 | `home/git.nix`        | git and its configuration                                             | `christianhuth` |
 | `home/gnupg.nix`      | pass, gnupg, and the GPG_TTY export                                   | `christianhuth` |
 | `home/kubeswitch.nix` | kubeswitch and its shell function                                     | `christianhuth` |
@@ -314,6 +316,7 @@ are not what you would expect:
 | Microsoft Teams | **`teams-for-linux`** | `teams` exists in nixpkgs for macOS only; Microsoft discontinued the official Linux client |
 | `virtctl` | **`kubevirt`** | no package of its own; `virtctl` ships as part of `kubevirt` |
 | `composer` | **`php84Packages.composer`** | there is no top-level attribute |
+| `ansible-core` | **`ansible`** | reversed from what it looks like: `pkgs.ansible` *is* ansible-core (2.21.1); there is no top-level `pkgs.ansible-core`, and the full bundle with collections is `python3Packages.ansible` (13.7.0) |
 | Nextcloud | **`nextcloud-client`** | listed as "system-wide", read here as the desktop sync client rather than the server. If you meant the server: that does not run sensibly through Nix on Ubuntu, it is a NixOS module (`services.nextcloud`). |
 
 Also worth knowing:
@@ -325,9 +328,17 @@ Also worth knowing:
 - **Spotify** is unfree, hence `config.allowUnfree = true` in the flake. Because
   it is wired in there, you do not need `NIXPKGS_ALLOW_UNFREE=1` when
   installing.
-- **Both VSCodium extensions are available in nixpkgs**
-  (`ms-kubernetes-tools.vscode-kubernetes-tools` and `anthropic.claude-code`),
-  so no marketplace overlay such as `nix-vscode-extensions` is needed.
+- **All VSCodium extensions are available in nixpkgs**, so no marketplace overlay
+  such as `nix-vscode-extensions` is needed:
+
+  | Extension | nixpkgs attribute | Version |
+  |---|---|---|
+  | Claude Code | `anthropic.claude-code` | 2.1.223 |
+  | GitLens | `eamodio.gitlens` | 17.11.1 (MIT) |
+  | Kubernetes | `ms-kubernetes-tools.vscode-kubernetes-tools` | 1.3.29 |
+
+  They live under `pkgs.vscode-extensions` and are listed in
+  `programs.vscodium.profiles.default.extensions`, sorted by publisher.
 
 ## krew
 
@@ -383,6 +394,39 @@ Two things worth knowing:
   is where kubeconfig stores are configured (filesystem paths, Gardener, Cluster
   API, Vault and so on). It is left empty for now, so kubeswitch uses its
   defaults.
+
+### kubectx / kubens, and why they alias the function
+
+```nix
+programs.bash.shellAliases = {
+  kubectx = "switch";
+  kubens = "switch namespace";
+};
+```
+
+Both point at the shell function, never at the `switcher` binary — and that is
+the whole difference between working and not working. The generated init script
+makes it explicit:
+
+```bash
+function switch(){
+  RESPONSE="$($EXECUTABLE_PATH "${opts[@]}")"   # runs the switcher binary
+  ...                                           # response: "__ <path>,<context>"
+  export KUBECONFIG="$KUBECONFIG_PATH"          # <- this is what sets it
+}
+```
+
+The binary only *prints* the selected kubeconfig path on stdout; a child process
+cannot change its parent shell's environment. So calling `switcher` directly
+selects a cluster and leaves `KUBECONFIG` unset, after which kubectl falls back
+to no configuration at all:
+
+```
+The connection to the server localhost:8080 was refused
+```
+
+That is exactly the failure upstream means when it says not to call the binary
+directly. Use `switch` (or now `kubectx`), and `kubens` for the namespace.
 
 ## Own packages: Termius from the official .deb
 
@@ -671,6 +715,116 @@ declarative settings such as `PASSWORD_STORE_DIR`, and extensions live under
 `passExtensions` (`pass-otp`, `pass-import`, …), added through
 `pass.withExtensions`.
 
+## The ~/code layout
+
+`home/code.nix` keeps three directories present and manages one `.envrc`:
+
+```
+~/code/proact/ansible        <- plus its .envrc
+~/code/typo3/extensions
+~/code/typo3/sitepackages
+```
+
+Directory creation is an activation script rather than `home.file`, because
+`home.file` cannot express "an empty *mutable* directory" — it would need a
+placeholder file in each one, or turn them into store symlinks. These have to
+stay ordinary writable directories: they hold working copies.
+
+### Can Nix clone repositories?
+
+Not usefully, and it is worth being precise about why. `fetchgit` and friends do
+fetch repositories, but into `/nix/store` — read-only, and with no `.git` you
+could commit to. That is right for build inputs and wrong for a working copy.
+
+What does work is the same pattern as `home/wireguard.nix`: an idempotent
+activation script that clones a repository *if the directory does not exist yet*.
+Nix then declares **which** repositories belong where, while git does the
+cloning. Deliberately clone-only, not pull: re-pulling on every switch would
+trample dirty working trees and half-finished branches.
+
+If more than bootstrapping is wanted, nixpkgs has purpose-built multi-repo tools
+— `mr` (myrepos), `vcspull`, `gita` — which handle status and updates across many
+checkouts. Those are the right answer for "keep 20 repositories in sync"; an
+activation script is the right answer for "make sure this one is there".
+
+`home/code.nix` does exactly that. Three repositories are declared:
+
+| Path below `~/code` | Repository |
+|---|---|
+| `proact/ansible/base` | `paas/pmcp-base.git` |
+| `proact/ansible/operational-scripts` | `paas/operational-scripts.git` |
+| `proact/ansible/site` | `paas/site.git` |
+
+All three take the remote's default branch. `branch` is an optional per-repository
+attribute for the case where a specific one is needed:
+
+```nix
+"proact/ansible/base" = {
+  url = "https://gitlab.proact.eu/paas/pmcp-base.git";
+  branch = "stable-20260626";
+};
+```
+
+Note this only affects *new* clones. The existing `base` working copy sits on
+`stable-20260626` and stays there — the script never touches a directory that
+already exists, so it neither pulls nor switches branches.
+
+The URLs deliberately drop the `christian.huth@` that the existing remotes carry.
+That username was only ever there to work around a credential helper that did not
+return one; `username_extractor = "static"` now supplies it, so embedding it is
+redundant. All three carry the `.git` suffix, without which GitLab answers with a
+redirect (`warning: redirecting to .../pmcp-base.git/`) — harmless but noisy.
+
+The logic is a `writeShellApplication`, run both from `home.activation` and as the
+command `code-repos-clone`, so a newly declared repository can be fetched without
+a full switch. It exports `GIT_TERMINAL_PROMPT=0` on purpose: credentials come
+from pass-git-helper via gpg-agent, and if that chain is not ready — a fresh
+machine, a locked agent — the clone should fail visibly rather than hang inside
+`home-manager switch`. A failure prints what to re-run and does not abort the
+activation.
+
+Verified end to end by cloning `pmcp-base` into a temporary directory: credentials
+resolved with no prompt, and `--branch` checked out the requested branch.
+
+### The managed .envrc
+
+Taken over verbatim from the existing local file. It is safe to keep here because
+it contains no secret itself — it *fetches* one via
+`pass show proact/ssh-password`:
+
+```bash
+layout_python3
+
+export ANSIBLE_BECOME_PASS=$(pass show proact/ssh-password | head -n 1)
+export ANSIBLE_VAULT_PASSWORD=$(pwd)/operational-scripts/bin/ansible-vault-password.sh
+```
+
+Verified byte-identical to what was there before.
+
+`force = true` is set on that file, and the reason is subtler than it looks.
+Home Manager's link helper contains this:
+
+```bash
+if [[ -e "$targetPath" && ! -L "$targetPath" ]] && cmp -s "$sourcePath" "$targetPath" ; then
+  # The target exists but is identical - don't do anything.
+```
+
+So while the content matches, the existing plain file is left alone and *not*
+replaced by a symlink — independently of `force`, and reported only in verbose
+mode. `force` acts on the earlier `checkLinkTargets` step instead: without it,
+the first content change here would abort the switch with "would be clobbered".
+With it, the change simply replaces the file with a symlink. Verified by
+temporarily altering the content and watching `ln -Tsf` appear in a dry run.
+
+Two consequences to keep in mind: once it is a symlink the file is read-only, so
+edits happen in this repository followed by a switch; and direnv records an
+allow-token per content, so a change needs `direnv allow` once more.
+
+One correction against the original file: it exported `ANSIBLE_VAULT_PASSWORD`
+pointing at a script path, but that variable is the password *itself* in the
+versions that support it. The variable for a password file is
+`ANSIBLE_VAULT_PASSWORD_FILE`, which is what is used here.
+
 ## atuin
 
 Shell history in SQLite instead of `~/.bash_history`, with a searchable UI on
@@ -722,6 +876,34 @@ The database starts empty; `~/.bash_history` is not read automatically. One-time
 ```bash
 atuin import auto
 ```
+
+## direnv
+
+`home/direnv.nix` enables direnv 2.37.1 together with **nix-direnv** 3.1.2. The
+latter is the part that matters on a Nix machine: it replaces direnv's own
+`use_nix` / `use_flake` with an implementation that caches the evaluated
+environment and anchors it as a GC root. Without it, entering a project directory
+re-evaluates every time, and `nix-collect-garbage` can remove the result from
+under it.
+
+The option is `nix-direnv.enable`; the older `enableNixDirenvIntegration` is only
+a deprecated alias.
+
+Generated files:
+
+| Path | Purpose |
+|---|---|
+| `~/.config/direnv/lib/hm-nix-direnv.sh` | nix-direnv's `use_flake`/`use_nix`, loaded from direnv's `lib/` so it composes with a hand-written `direnvrc` |
+| end of `~/.bashrc` | `eval "$(direnv hook bash)"`, placed via `mkAfter` so it comes after anything touching the prompt |
+
+Not set yet: `silent = true`, which would add `log_format = "-"` and
+`log_filter = "^$"` to `direnv.toml` and stop direnv from listing the loaded
+variables on every directory change. Left off until it has been seen how chatty
+it is in practice. Note the option is called `silent` — there is no
+`hide_env_diff` in this module.
+
+Per project, direnv still needs an `.envrc` (`use flake` for this kind of
+repository) and a one-time `direnv allow`.
 
 ## WireGuard via NetworkManager
 

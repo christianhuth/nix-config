@@ -16,6 +16,8 @@
   imports = [
     ./atuin.nix # atuin shell history (needs bash.nix for its integration)
     ./bash.nix # bash itself + ~/.bashrc, ~/.profile, ~/.bash_profile
+    ./code.nix # ~/code directory layout + the ansible .envrc
+    ./direnv.nix # direnv + nix-direnv (needs bash.nix for its hook)
     ./git.nix # git + its configuration
     ./gnupg.nix # pass, gnupg, and GPG_TTY
     ./kubeswitch.nix # kubeswitch (needs bash.nix for its shell function)
@@ -67,5 +69,23 @@
     # --- Development ----------------------------------------------------
     gh
     php84Packages.composer # there is no top-level `composer` attribute
+
+    # Astral's Python package manager. Note how it interacts with the
+    # `layout_python3` in home/code.nix's .envrc: direnv's layout builds a plain
+    # virtualenv from whatever python3 is in PATH, and uv operates inside it.
+    uv
+
+    # Provides `ansible-galaxy` along with `ansible`, `ansible-playbook`,
+    # `ansible-vault` and the rest.
+    #
+    # Careful with the naming here, it is the reverse of what it looks like:
+    # `pkgs.ansible` is ansible-**core** (2.21.1), i.e. engine plus CLI without
+    # the community collections. There is no top-level `pkgs.ansible-core`. The
+    # full bundle with ~100 collections preinstalled is
+    # `python3Packages.ansible` (13.7.0).
+    #
+    # Core is the deliberate choice: collections belong per project via
+    # ansible-galaxy and a requirements.yml, which is what ansible-galaxy is for.
+    ansible
   ];
 }

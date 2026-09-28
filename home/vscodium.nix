@@ -8,9 +8,11 @@
     enable = true; # installs VSCodium itself
 
     # Since Home Manager 25.05 these options live under profiles.<name>.
+    # Sorted by publisher, purely so additions have an obvious place to go.
     profiles.default.extensions = with pkgs.vscode-extensions; [
-      ms-kubernetes-tools.vscode-kubernetes-tools
       anthropic.claude-code
+      eamodio.gitlens
+      ms-kubernetes-tools.vscode-kubernetes-tools
     ];
   };
 }

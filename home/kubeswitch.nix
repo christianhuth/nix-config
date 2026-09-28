@@ -17,4 +17,18 @@
     # kubeconfig stores go (filesystem paths, Gardener, CAPI, Vault, ...).
     # Left out for now; without it kubeswitch uses its defaults.
   };
+
+  # Familiar names from kubectx/kubens.
+  #
+  # Both deliberately point at the shell function `switch`, never at the
+  # `switcher` binary. The binary only prints "__ <kubeconfig path>,<context>" on
+  # stdout; it cannot touch the calling shell's environment. It is the function
+  # that parses that and runs `export KUBECONFIG=...`. An alias to `switcher`
+  # would therefore select a cluster and leave KUBECONFIG unset, which makes
+  # kubectl fall back to localhost:8080 -- the failure upstream warns about when
+  # it says not to call the binary directly.
+  programs.bash.shellAliases = {
+    kubectx = "switch";
+    kubens = "switch namespace";
+  };
 }
