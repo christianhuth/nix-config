@@ -32,6 +32,7 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/git.nix`        | git and its configuration                                             | `christianhuth` |
 | `home/gnupg.nix`      | pass, gnupg, and the GPG_TTY export                                   | `christianhuth` |
 | `home/kubeswitch.nix` | kubeswitch and its shell function                                     | `christianhuth` |
+| `home/wireguard.nix`  | wireguard-tools + import of ~/.wireguard/*.conf into NetworkManager   | `christianhuth` |
 | `home/krew.nix`       | krew and its plugins                                                  | `christianhuth` |
 | `home/vscodium.nix`   | VSCodium and its extensions                                           | `christianhuth` |
 | `pkgs/overlay.nix`    | our own packages and overrides, applied on top of nixpkgs             | both layers     |
@@ -668,6 +669,116 @@ Worth knowing for later: `programs.password-store` is a Home Manager module for
 declarative settings such as `PASSWORD_STORE_DIR`, and extensions live under
 `passExtensions` (`pass-otp`, `pass-import`, …), added through
 `pass.withExtensions`.
+
+## WireGuard via NetworkManager
+
+`home/wireguard.nix` imports every `~/.wireguard/*.conf` into NetworkManager.
+The tunnel configurations themselves stay **outside** this repository, and that
+is not only a preference: they contain WireGuard private keys, and everything in
+`/nix/store` is world-readable. Nix orchestrates the import; it never holds the
+secrets. NetworkManager's own copy under `/etc/NetworkManager/system-connections`
+is mode 0600 and root-owned, i.e. stricter than the source file.
+
+The logic lives in a `writeShellApplication` that is both run from
+`home.activation` and exposed as the command `wireguard-nm-import`, so a newly
+dropped `.conf` can be picked up without a full switch. It is idempotent: a
+tunnel NetworkManager already knows is skipped.
+
+Three decisions in there are deliberate:
+
+**Ubuntu's `nmcli`, not nixpkgs'.** `nmcli` talks to the running NetworkManager
+over D-Bus, and the versions differ — Ubuntu runs 1.54.3, nixpkgs 26.05 ships
+1.56.0. Matching the daemon is safer, the same reasoning as for gpg and its
+agent.
+
+**The directory is managed, its contents are not.** The script creates
+`~/.wireguard` and enforces mode `0700` on every run, because the files inside
+hold WireGuard private keys. Two other routes were considered and rejected:
+`home.file` would turn the directory into a symlink into the store, which
+conflicts with the configurations having to stay mutable and outside Nix; and
+`systemd.user.tmpfiles` would install four of nixpkgs' systemd units plus a
+cleanup timer into `~/.config/systemd/user` and run `systemd-tmpfiles --remove`
+— a lot of machinery, and cleanup semantics next to private keys, in exchange for
+one `mkdir`.
+
+An empty or missing directory is handled: `shopt -s nullglob` makes the pattern
+expand to nothing instead of iterating over the literal `*.conf`, and the script
+says so rather than failing. Verified for all three cases — missing directory,
+empty directory, and a loosened mode being tightened back to `0700`.
+
+**Imported tunnels are taken down again.** `nmcli connection import` activates
+the profile immediately: at that moment its `autoconnect` is still at the default
+of `yes`, so NetworkManager brings the tunnel up. Setting `autoconnect` afterwards
+only affects later boots and leaves the running tunnel in place — which is why a
+first run appeared to ignore the setting and started everything at once. The
+script therefore takes anything down explicitly that is not on the autoconnect
+list.
+
+**Autoconnect is opt-in per tunnel, and reconciled.** All five configurations
+are split tunnels (no `0.0.0.0/0`), so they do not fight over the default route
+and could in principle all run at once — but VPNs coming up by themselves are
+surprising. The list is currently empty, so every tunnel is brought up by hand:
+
+```nix
+autoconnect = [ ];
+```
+
+The setting is applied on **every** run, not only at import, so this list is the
+single source of truth — adding or removing a name and switching is enough. What
+the script does *not* do on a reconcile is change the running state: autoconnect
+governs boot behaviour, and tearing down a tunnel someone is using because a
+switch happened to run would be hostile. At import time it does take the tunnel
+down, because there the tunnel was started as a side effect rather than by
+anyone's choice.
+
+A note on how the list is rendered: `$name` has to be the `case` subject rather
+than the list, otherwise the subject is a constant after Nix interpolation and
+ShellCheck flags SC2194 — which it did, failing the build until it was turned
+around. That check runs on every build, which is the point of using
+`writeShellApplication` instead of a bare string.
+
+**`runtimeInputs` declared strictly.** `writeShellApplication` only *prefixes*
+PATH, so an undeclared tool silently falls through to Ubuntu's copy and breaks
+the day that changes. `nmcli` is the one deliberate exception, for the version
+reason above.
+
+### Volatile connections
+
+`nmcli -t -f NAME,FILENAME connection show` shows where each profile is stored,
+and on this machine nearly all of them sit under
+`/run/NetworkManager/system-connections` — tmpfs. That is **not** a problem by
+itself: Ubuntu lets netplan own NetworkManager's profiles, so `/etc/netplan`
+holds the source and `/run` only the render.
+
+The distinguishing mark is the filename. Netplan renders as
+`netplan-<something>.nmconnection`; a file in `/run` *without* that prefix has no
+netplan source and exists in tmpfs only:
+
+| Connection | File in `/run` | Verdict |
+|---|---|---|
+| Wi-Fi ×3, `netplan-enp1s0f0` | `netplan-NM-<uuid>…`, `netplan-enp1s0f0…` | persistent |
+| `defra` (imported through this module) | `netplan-defra.nmconnection` | persistent |
+| `lo`, `Wired connection 1` | plain names | volatile, but NetworkManager-generated defaults |
+| `mgmt2` | `mgmt2.nmconnection` | **volatile, and it matters** |
+
+A fresh `nmcli connection import` is picked up by netplan, which writes
+`/etc/netplan/90-NM-<uuid>.yaml` and renders into `/run` — verified by importing
+`defra`. So `mgmt2` was presumably imported with `--temporary` at some point; the
+fix is to re-import it:
+
+```bash
+nmcli connection delete mgmt2
+home-manager switch --flake .#christianhuth
+```
+
+Deleting it first and letting the switch re-import is the simpler route: the
+activation step picks up everything NetworkManager does not know, so the same run
+also handles any tunnel still missing. Be aware that the delete tears down the
+tunnel if it is currently up.
+
+The import script applies exactly the heuristic above and only warns for the
+genuinely volatile case. It never re-imports on its own, since that would drop a
+live tunnel.
 
 ## Mixing channels: Signal from unstable
 

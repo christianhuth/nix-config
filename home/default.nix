@@ -20,6 +20,7 @@
     ./kubeswitch.nix # kubeswitch (needs bash.nix for its shell function)
     ./krew.nix # krew + its plugins
     ./vscodium.nix # VSCodium + extensions
+    ./wireguard.nix # wireguard-tools + NetworkManager import
   ];
 
   home.username = username;
@@ -50,7 +51,6 @@
     termius
 
     # --- Network / VPN --------------------------------------------------
-    wireguard-tools # provides `wg` and `wg-quick` (tunnels still need sudo)
     netbird
 
     # --- Kubernetes -----------------------------------------------------
