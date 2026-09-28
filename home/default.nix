@@ -16,6 +16,7 @@
   imports = [
     ./bash.nix # bash itself + ~/.bashrc, ~/.profile, ~/.bash_profile
     ./git.nix # git + its configuration
+    ./gnupg.nix # pass, gnupg, and GPG_TTY
     ./kubeswitch.nix # kubeswitch (needs bash.nix for its shell function)
     ./krew.nix # krew + its plugins
     ./vscodium.nix # VSCodium + extensions

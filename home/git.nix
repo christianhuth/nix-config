@@ -5,8 +5,12 @@
     enable = true; # installs git as well -- that is why it is not in home.packages
 
     # Writes ~/.config/git/config, i.e. exactly the file that
-    # `git config --global` touches. Note that an existing ~/.gitconfig takes
-    # precedence over this file; there is none on this machine.
+    # `git config --global` touches.
+    #
+    # Careful: git reads both this file and ~/.gitconfig, and ~/.gitconfig wins
+    # for single-valued variables. A leftover ~/.gitconfig here currently
+    # duplicates init.defaultBranch with the same value, so it is harmless --
+    # but it would silently override a change made here. See README.md.
     #
     # In Home Manager 26.05 this option is called `settings`;
     # `extraConfig` still works but is a deprecated alias. The same applies to
@@ -49,6 +53,13 @@
       # Remember how a conflict was resolved and reapply it if the same
       # conflict shows up again (rebases, cherry-picks, long-lived branches).
       rerere.enabled = true;
+
+      # --- Credentials ------------------------------------------------------
+      # pass-git-helper resolves credentials from the pass store. The leading
+      # `!` tells git to run the value as a shell command. The tool itself is
+      # installed in home/gnupg.nix, and it needs a host-to-entry mapping in
+      # ~/.config/pass-git-helper/git-pass-mapping.ini -- see README.md.
+      credential.helper = "!pass-git-helper $@";
 
       # --- Convenience ------------------------------------------------------
       # Show the full diff in the editor while writing the commit message.

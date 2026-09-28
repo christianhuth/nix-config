@@ -30,6 +30,7 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/default.nix`    | **the per-user package list** (`home.packages`) and the imports below | `christianhuth` |
 | `home/bash.nix`       | bash, and the generated `~/.bashrc`, `~/.profile`, `~/.bash_profile`  | `christianhuth` |
 | `home/git.nix`        | git and its configuration                                             | `christianhuth` |
+| `home/gnupg.nix`      | pass, gnupg, and the GPG_TTY export                                   | `christianhuth` |
 | `home/kubeswitch.nix` | kubeswitch and its shell function                                     | `christianhuth` |
 | `home/krew.nix`       | krew and its plugins                                                  | `christianhuth` |
 | `home/vscodium.nix`   | VSCodium and its extensions                                           | `christianhuth` |
@@ -224,6 +225,23 @@ the system-wide profile, as intended.
 flake source is not a clean git checkout, so the result cannot be traced back
 to a commit. Staged-but-uncommitted files count as dirty. It disappears once
 you commit — and `flake.lock` belongs in that commit.
+
+**Settings from `home/git.nix` not taking effect.** git reads both
+`~/.config/git/config` (which Home Manager writes) and `~/.gitconfig`, and
+`~/.gitconfig` wins for single-valued variables. Anything ever set with
+`git config --global` before Home Manager took over lives there and silently
+overrides this configuration. Check with:
+
+```bash
+git config --list --show-origin | grep gitconfig
+```
+
+There is currently one such leftover, `init.defaultBranch = main` — the same
+value this repository sets, so harmless today. Removing it avoids the trap:
+
+```bash
+rm ~/.gitconfig
+```
 
 **`git init` and flakes.** Inside a git repository, flakes only see **files git
 knows about**. So after `git init`, always run `git add .` — otherwise
@@ -432,6 +450,160 @@ nix build .#termius && ./result/bin/termius-app
 ```
 
 `termius` is exposed as a flake output for that purpose.
+
+## pass and GnuPG
+
+Both are plain entries in `home.packages`, but two choices in there are
+deliberate.
+
+**`pass-wayland` instead of `pass`.** It is the same 1.7.4, defined as
+`pass.override { waylandSupport = true; }`. Since that override only *adds*
+Wayland support and leaves `x11Support` at its default, `pass -c` copies through
+`wl-copy` in the Wayland session and still works for XWayland applications.
+Plain `pass` would only have shipped `xclip`.
+
+**gnupg coexists with Ubuntu's.** Ubuntu has gnupg 2.4.8 in `/usr/bin`; this is
+2.4.9, and because `~/.nix-profile/bin` comes first in PATH it shadows Ubuntu's
+`gpg`. Verified to work: it reads the existing `~/.gnupg` keyring, trust
+included. But it prints this on every invocation:
+
+```
+gpg: WARNING: server 'gpg-agent' is older than us (2.4.8 < 2.4.9)
+```
+
+The cause is that the *client* now comes from Nix while the *agent* is still
+Ubuntu's, started by its systemd user units (`gpg-agent.socket` is active, and
+the process runs as `gpg-agent --supervised`). Harmless, just noisy.
+
+The clean fix is to let Home Manager own the agent too, via
+`services.gpg-agent`. That writes `~/.config/systemd/user/gpg-agent.*`, which
+takes precedence over Ubuntu's units, so it is a takeover rather than a
+conflict. It also settles pinentry: nixpkgs builds gnupg with
+`guiSupport = false` on Linux, so no pinentry path is compiled in and the agent
+falls back to whatever `pinentry` is in PATH — currently Ubuntu's
+`/usr/bin/pinentry`.
+
+This is deliberately *not* configured yet. The existing key belongs to a work
+identity, and taking over the agent touches passphrase caching and possibly SSH
+agent behaviour, so it should be a conscious step rather than a side effect of
+installing a package.
+
+### The agent, GPG_TTY and pinentry
+
+`services.gpg-agent` in `home/gnupg.nix` takes the agent over from Ubuntu. Home
+Manager writes `~/.config/systemd/user/gpg-agent.{socket,service}`, and user
+units there take precedence over Ubuntu's in `/usr/lib/systemd/user`, so this is
+a handover rather than a fight. It also removes the warning above, because
+client and agent now come from the same build.
+
+Three things come with it:
+
+**`GPG_TTY`.** `enableBashIntegration = true` emits exactly
+
+```bash
+GPG_TTY="$(tty)"
+export GPG_TTY
+```
+
+into the interactive section of the generated `~/.bashrc`. `pass` and
+`pass-git-helper` need it so pinentry knows which terminal to prompt on.
+
+The placement matters. `home.sessionVariables` and
+`programs.bash.sessionVariables` look like the right options and are not: both
+land in `~/.profile`, which is sourced **once** per login session, whereas
+`$(tty)` has to be evaluated per terminal — and in a non-interactive context
+`tty` prints "not a tty" and exits non-zero, which would make the variable
+actively wrong. The shell integration writes it after the interactive guard,
+where a tty is guaranteed:
+
+```bash
+[[ $- == *i* ]] || return     # interactive guard
+...
+GPG_TTY="$(tty)"              # <- here
+export GPG_TTY
+```
+
+Setting it by hand through `programs.bash.initExtra` works identically — that
+option is of type `lines` and merges — but there is no reason to once the agent
+module is on.
+
+**pinentry.** nixpkgs builds gnupg with `guiSupport = false` on Linux, so no
+pinentry path is compiled in and the agent falls back to whatever `pinentry` is
+in PATH. `pinentry.package` pins it instead, which produces
+
+```
+# ~/.gnupg/gpg-agent.conf
+grab
+pinentry-program /nix/store/…-pinentry-gnome3-1.3.2/bin/pinentry
+```
+
+`pinentry-gnome3` suits this GNOME/Wayland session. If a prompt ever fails to
+appear, adding `pkgs.gcr` to `home.packages` is the documented fix and
+`pkgs.pinentry-curses` the fallback.
+
+**`gpg.conf`.** `programs.gpg.enable` also writes `~/.gnupg/gpg.conf` with Home
+Manager's hardening defaults (AES256, SHA512 preferences, `keyid-format
+0xlong`, …). There was no `gpg.conf` here before, so nothing was overwritten,
+and `mutableKeys`/`mutableTrust` stay at their default `true` — the existing
+keyring, secret keys and trustdb are untouched.
+
+Not enabled: `enableSshSupport`. That would make gpg-agent replace ssh-agent and
+take over SSH key handling, which is a separate decision from managing GnuPG.
+
+### git credentials via pass
+
+`home/git.nix` sets
+
+```nix
+credential.helper = "!pass-git-helper $@";
+```
+
+The leading `!` tells git to run the value as a shell command. Verified to round
+trip correctly through git's own config parser:
+
+```bash
+$ git config --get credential.helper
+!pass-git-helper $@
+```
+
+`pass-git-helper` itself is installed in `home/gnupg.nix`, since a helper
+configured but not installed would only surface as a credential failure.
+
+One manual step is left, and it cannot sensibly be generated: the helper needs a
+host-to-entry mapping at `~/.config/pass-git-helper/git-pass-mapping.ini`, whose
+content depends on how the password store is laid out. For example:
+
+```ini
+[github.com*]
+target=github.com
+
+[gitlab.example.org*]
+target=work/gitlab
+```
+
+Once that layout is settled, the file can be moved into the configuration as an
+`xdg.configFile` entry.
+
+### Initialising the store
+
+`pass` needs a GPG key with an encryption subkey. The existing key qualifies:
+
+```
+sec   rsa4096/175F8A4C86918611  Christian Huth (dechhu) <christian.huth@proact.eu>
+ssb   rsa4096/21AE42C0E58533ED  [E]     <- encryption subkey
+```
+
+```bash
+pass init 175F8A4C86918611
+```
+
+That creates `~/.password-store`. Name the primary key; pass resolves the
+encryption subkey itself.
+
+Worth knowing for later: `programs.password-store` is a Home Manager module for
+declarative settings such as `PASSWORD_STORE_DIR`, and extensions live under
+`passExtensions` (`pass-otp`, `pass-import`, …), added through
+`pass.withExtensions`.
 
 ## Mixing channels: Signal from unstable
 
