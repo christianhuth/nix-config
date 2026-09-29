@@ -26,6 +26,7 @@
     ./krew.nix # krew + its plugins
     ./vscodium.nix # VSCodium + extensions
     ./wireguard.nix # wireguard-tools + NetworkManager import
+    ./yubikey.nix # ykman (plus the system prerequisites it needs)
   ];
 
   home.username = username;

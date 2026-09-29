@@ -39,6 +39,7 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/root.nix`       | entry point for the root user: shell + prompt only                    | `root`          |
 | `home/starship.nix`   | the shell prompt (owns PS1; see home/bash.nix)                        | `christianhuth` |
 | `home/wireguard.nix`  | wireguard-tools + import of ~/.wireguard/*.conf into NetworkManager   | `christianhuth` |
+| `home/yubikey.nix`    | ykman, plus what Ubuntu has to provide around it                      | `christianhuth` |
 | `home/krew.nix`       | krew and its plugins                                                  | `christianhuth` |
 | `home/vscodium.nix`   | VSCodium and its extensions                                           | `christianhuth` |
 | `pkgs/overlay.nix`    | our own packages and overrides, applied on top of nixpkgs             | both layers     |
@@ -1136,6 +1137,65 @@ it is in practice. Note the option is called `silent` — there is no
 
 Per project, direnv still needs an `.envrc` (`use flake` for this kind of
 repository) and a one-time `direnv allow`.
+
+## ykman
+
+`pkgs.yubikey-manager` (5.9.1, newer than Ubuntu's apt 5.8.0-4) provides the
+`ykman` binary — note the attribute and the command have different names.
+
+Installing it is not a working setup on its own, and `ykman info` says so:
+
+```
+WARNING: PC/SC not available. Smart card (CCID) protocols will not function.
+Device type: YubiKey 5C NFC
+Enabled USB interfaces: OTP, FIDO, CCID
+```
+
+### Why, measured rather than assumed
+
+With the key plugged in (USB `1050:0407`), the two HID interfaces differ:
+
+| Device | Permissions | Meaning |
+|---|---|---|
+| `/dev/hidraw1` | ACL `christianhuth:rw-` | FIDO — works |
+| `/dev/hidraw0` | `crw------- root root` | OTP — no access |
+
+The asymmetry is a udev chain. systemd's `70-uaccess.rules` line 60 reads
+
+```
+ENV{ID_SECURITY_TOKEN}=="?*", TAG+="uaccess"
+```
+
+and `60-fido-id.rules` only sets that variable on the FIDO interface. Yubico's own
+`69-yubikey.rules` sets it by USB product id instead — `0407` is listed explicitly
+— so it covers the OTP interface too.
+
+### The two system prerequisites
+
+Both are outside what Home Manager can reach off NixOS: a rule in `/etc/udev` and a
+daemon with a systemd unit.
+
+```bash
+sudo apt install pcscd                    # PIV, OATH and OpenPGP applets
+sudo apt install yubikey-personalization  # ships 69-yubikey.rules -> OTP applet
+```
+
+Only the library `libpcsclite1` was installed here; the `pcscd` daemon was missing
+entirely (`pcscd.service` inactive, `pcscd.socket` not-found). FIDO/WebAuthn works
+without either package.
+
+Both rules could in principle come from Nix — `pkgs.yubikey-personalization` ships
+the same `lib/udev/rules.d/69-yubikey.rules` — but the root-side install and the
+udev reload would be a manual step either way, and a daemon needs its unit. apt is
+the honest answer for this half.
+
+### One interaction with gnupg
+
+gpg-agent's `scdaemon` and `pcscd` both want the card and can lock each other out
+("card busy"). If the OpenPGP applet is ever driven from gpg,
+`programs.gpg.scdaemonSettings` is where that gets settled — typically
+`disable-ccid = true`, so scdaemon goes through pcscd rather than driving the reader
+itself. Not configured until it is actually needed.
 
 ## WireGuard via NetworkManager
 
