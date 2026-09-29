@@ -32,9 +32,12 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/bash.nix`       | bash, and the generated `~/.bashrc`, `~/.profile`, `~/.bash_profile`  | `christianhuth` |
 | `home/code.nix`       | ~/code directory layout + the managed ansible .envrc                  | `christianhuth` |
 | `home/direnv.nix`     | direnv + nix-direnv                                                   | `christianhuth` |
+| `home/fonts.nix`      | fontconfig for the Nix profile + the Nerd Font starship needs         | `christianhuth` |
 | `home/git.nix`        | git and its configuration                                             | `christianhuth` |
 | `home/gnupg.nix`      | pass, gnupg, and the GPG_TTY export                                   | `christianhuth` |
 | `home/kubeswitch.nix` | kubeswitch and its shell function                                     | `christianhuth` |
+| `home/root.nix`       | entry point for the root user: shell + prompt only                    | `root`          |
+| `home/starship.nix`   | the shell prompt (owns PS1; see home/bash.nix)                        | `christianhuth` |
 | `home/wireguard.nix`  | wireguard-tools + import of ~/.wireguard/*.conf into NetworkManager   | `christianhuth` |
 | `home/krew.nix`       | krew and its plugins                                                  | `christianhuth` |
 | `home/vscodium.nix`   | VSCodium and its extensions                                           | `christianhuth` |
@@ -328,17 +331,8 @@ Also worth knowing:
 - **Spotify** is unfree, hence `config.allowUnfree = true` in the flake. Because
   it is wired in there, you do not need `NIXPKGS_ALLOW_UNFREE=1` when
   installing.
-- **All VSCodium extensions are available in nixpkgs**, so no marketplace overlay
-  such as `nix-vscode-extensions` is needed:
-
-  | Extension | nixpkgs attribute | Version |
-  |---|---|---|
-  | Claude Code | `anthropic.claude-code` | 2.1.223 |
-  | GitLens | `eamodio.gitlens` | 17.11.1 (MIT) |
-  | Kubernetes | `ms-kubernetes-tools.vscode-kubernetes-tools` | 1.3.29 |
-
-  They live under `pkgs.vscode-extensions` and are listed in
-  `programs.vscodium.profiles.default.extensions`, sorted by publisher.
+- **VSCodium extensions do not come from nixpkgs** — see the section below for
+  why not.
 
 ## krew
 
@@ -825,6 +819,244 @@ pointing at a script path, but that variable is the password *itself* in the
 versions that support it. The variable for a password file is
 `ANSIBLE_VAULT_PASSWORD_FILE`, which is what is used here.
 
+## VSCodium extensions
+
+They come from the `nix-vscode-extensions` flake, not `pkgs.vscode-extensions`,
+and the extensions directory is immutable. Both parts are needed; either alone
+does not hold.
+
+### What went wrong first
+
+The first attempt declared the extensions from nixpkgs and left
+`mutableExtensionsDir` at its default. After a while only GitLens was active, and
+Kubernetes Tools had vanished. The symlinks were all still intact — the answer was
+in `~/.vscode-oss/extensions/.obsolete`:
+
+```json
+{ "anthropic.claude-code-2.1.223": true,
+  "ms-kubernetes-tools.vscode-kubernetes-tools-1.3.29": true,
+  "eamodio.gitlens-17.11.1": true }
+```
+
+**VSCodium had marked every Nix-provided extension obsolete.** Its own
+`extensions.json` listed newer marketplace builds as real directories instead.
+
+That is `mutableExtensionsDir` doing exactly what it says: "whether extensions can
+be installed or updated manually or by VSCodium". Its default is true whenever only
+the `default` profile is used. VSCodium found newer versions, and since
+`/nix/store` is read-only it could not update in place — so it installed parallel
+copies and retired the Nix ones. The extension with no marketplace replacement
+simply disappeared.
+
+### Why the source had to change too
+
+Setting `mutableExtensionsDir = false` stops the drift, but on its own it would
+have pinned versions that were badly behind:
+
+| Extension | nixpkgs 26.05 | nixpkgs unstable | upstream |
+|---|---|---|---|
+| gitlens | 17.11.1 | 17.11.1 | **19.2.0** |
+| claude-code | 2.1.223 | 2.1.283 | 2.1.284 |
+| kubernetes-tools | 1.3.29 | 1.4.0 | 1.4.1 |
+
+Two major versions behind on gitlens is what made VSCodium overrule the
+declaration in the first place. `nix-vscode-extensions` mirrors Open VSX and the
+VS Code marketplace daily and closes that gap:
+
+| Extension | now installed |
+|---|---|
+| `anthropic.claude-code` | 2.1.283 |
+| `eamodio.gitlens` | 19.2.0 |
+| `ms-kubernetes-tools.vscode-kubernetes-tools` | 1.4.1 |
+
+Two choices inside that flake are deliberate:
+
+**`open-vsx-release`, not `open-vsx`.** The plain set includes pre-releases — for
+gitlens that means a date-versioned build (`2026.9.250515`) rather than the 19.2.0
+release.
+
+**Open VSX, not `vscode-marketplace`.** The Microsoft marketplace's terms cover
+use with Microsoft products, which VSCodium is not. Open VSX carries all three
+extensions at the same or newer versions anyway.
+
+**Applied as `nix-vscode-extensions.overlays.default`**, not by reading the flake's
+`extensions` output directly. That output is built from the flake's own nixpkgs
+instance, which has no `allowUnfree` — and the Claude Code extension is unfree, so
+evaluation fails. Going through our `pkgs` fixes it.
+
+### settings.json is managed too
+
+`profiles.default.userSettings` also puts `~/.config/VSCodium/User/settings.json`
+under Nix. The reason is narrow: the integrated terminal has its **own** font
+setting, entirely separate from Ptyxis, so the starship prompt rendered its
+powerline glyphs as boxes there while looking correct in Ptyxis.
+
+```nix
+"terminal.integrated.fontFamily" = "'FiraCode Nerd Font Mono', monospace";
+```
+
+The five settings that were already in the file are carried over verbatim, and
+`enableUpdateCheck`/`enableExtensionUpdateCheck = false` add `update.mode` and
+`extensions.autoCheckUpdates` — with an immutable extensions directory there is
+nothing VSCodium could do with a discovered update anyway.
+
+**The trade:** the file becomes a read-only store symlink, so VSCodium can no
+longer save settings changed through its UI. It had gained an
+`explorer.confirmDelete` entry between two looks during this work, so that is a
+real change in workflow: new settings go into `home/vscodium.nix` followed by a
+switch.
+
+One wrinkle worth recording. Forcing the overwrite has to use the **absolute**
+path, because that is the key the module registers the file under:
+
+```nix
+home.file."${config.xdg.configHome}/VSCodium/User/settings.json".force = true;
+```
+
+The relative `".config/VSCodium/User/settings.json"` form creates a *second*
+`home.file` entry aimed at the same target, which Home Manager rejects with
+"Conflicting managed target files".
+
+### One-time cleanup
+
+`mutableExtensionsDir = false` replaces the whole `~/.vscode-oss/extensions`
+directory with a single store symlink, so the existing directory is in the way:
+
+```
+Existing file '/home/christianhuth/.vscode-oss/extensions' would be clobbered
+```
+
+Nothing in it is worth keeping — only extension code and VSCodium's own registry.
+Settings and state live in `~/.config/VSCodium/User/` (`settings.json`,
+`globalStorage`, `workspaceStorage`) and are untouched:
+
+```bash
+rm -rf ~/.vscode-oss/extensions
+home-manager switch --flake .#christianhuth
+```
+
+### The trade
+
+Extensions can no longer be installed from within VSCodium. Adding one means
+adding it to `home/vscodium.nix` and switching. `nix flake update` moves the
+versions, which for a daily-updating mirror is the point rather than a surprise.
+
+## starship
+
+The prompt, using the bundled **gruvbox-rainbow** preset:
+
+```
+with a context     󰕈 christianhuth  …/code/christianhuth/nix-config   master +  ☸ demo-cluster (kube-system)
+without            󰕈 christianhuth  …/code/christianhuth/nix-config   master +
+```
+
+The preset covers the OS icon, the **username** (it sets
+`username.show_always = true` itself) and the path. Three things were needed on
+top.
+
+### Kubernetes has to be in the format
+
+starship ships the kubernetes module `disabled = true`, and **no preset turns it
+on** — presets only swap symbols and colours. gruvbox-rainbow does not mention
+kubernetes at all, so its symbol stays the stock `☸ `.
+
+Enabling it is still not enough: the preset defines its own top-level `format` as
+an explicit list of modules, and a module not named there renders nowhere however
+it is configured. So the format is overridden:
+
+```nix
+format = lib.concatStrings [
+  "[](color_orange)" "$os" "$username"
+  "[](bg:color_yellow fg:color_orange)" "$directory"
+  "[](fg:color_yellow bg:color_aqua)" "$git_branch" "$git_status"
+  "[](fg:color_aqua bg:color_purple)" "$kubernetes"        # <- added
+  "[](fg:color_purple bg:color_blue)" "$c$cpp$rust…"
+  "[](fg:color_blue bg:color_bg3)" "$docker_context" "$conda" "$pixi"
+  "[ ](fg:color_bg3)" "$line_break" "$character"
+];
+```
+
+`color_purple` because the preset leaves purple, green and red unused. The
+kubernetes module then follows the preset's own pattern, with `style` carrying only
+the background and the foreground set inside `format`:
+
+```nix
+kubernetes = {
+  disabled = false;
+  style = "bg:color_purple";
+  format = ''[[ $symbol$context( \($namespace\)) ](fg:color_fg0 bg:color_purple)]($style)'';
+};
+```
+
+Built with `lib.concatStrings` so each segment sits on its own line and the
+separator glyphs stay visible: U+E0B6 opening, U+E0B0 separator, U+E0B4 closing —
+the preset's own. Everything else is the preset's module list verbatim; note it has
+no `$cmd_duration`, unlike catppuccin-powerline, so switching presets means
+rebuilding this list rather than editing colour names.
+
+**`right_format` does not work here**, which cost a round: in bash starship only
+draws a right prompt when ble.sh is attached —
+
+```bash
+if [[ ${BLE_ATTACHED-} ]]; then
+    bleopt prompt_rps1="$(starship prompt --right ...)"
+fi
+```
+
+— and plain readline has no right prompt at all. `starship prompt --right` does
+print output when called by hand, which is exactly what made the first attempt look
+verified when it was not.
+
+### No clock
+
+`$time` is simply left out of the format list, and the closing cap moved from
+`color_bg1` to `color_bg3` accordingly. Disabling the `time` module instead would
+have left its two surrounding separators behind as a stray coloured block.
+
+### The path
+
+The preset leaves `truncate_to_repo` at its default of `true`, which inside a git
+repository collapses the path to just the repository name — which is why the path
+looked missing at first. `directory.truncate_to_repo = false` shows the last three
+components everywhere instead.
+
+Home Manager merges presets and `settings` with a deep merge
+(`tomlq 'reduce .[] as $item ({}; . * $item)'`), `settings` winning, so this lands
+inside the preset's existing `[directory]` table rather than colliding with it. The
+same rule is why there is no `git_branch.symbol` override: the preset sets its own
+Nerd Font glyph, and an override would blank it out.
+
+### Fonts
+
+The preset uses powerline separators and Nerd Font icons. `home/fonts.nix` installs
+`pkgs.nerd-fonts.fira-code`, which carries them (checked for U+E0B0 and U+E0A0).
+
+Two things were easy to get wrong here:
+
+**fontconfig has to be told about the Nix profile.** Before this,
+`fc-list | grep -c /nix/store` returned 0 and there was no
+`~/.config/fontconfig/conf.d`, so a font in `home.packages` would have been
+invisible. `fonts.fontconfig.enable = true` generates `10-hm-fonts.conf` and
+`52-hm-default-fonts.conf`.
+
+**The terminal has to select it**, and that is per terminal. Ptyxis is handled
+declaratively through dconf (see `home/fonts.nix`); its blocker was
+`use-system-font = true`, which makes it ignore `font-name` entirely. VSCodium's
+integrated terminal is a separate setting (`terminal.integrated.fontFamily`) and is
+not managed here.
+
+### Where the old prompt went
+
+`home/bash.nix` no longer sets `PS1`. The starship module injects its init with
+`lib.mkOrder 1900`, i.e. after everything that module sets at the default 1000, so
+any `PS1` there would be overwritten — dead code rather than a conflict.
+
+The terminal window title could not stay in `PS1` for the same reason, so it moved
+to `PROMPT_COMMAND`. That survives because starship's init explicitly preserves an
+existing one: it moves the value to `STARSHIP_PROMPT_COMMAND` and evaluates it from
+its own `starship_precmd`. One small regression — `\w` abbreviated `$HOME` to `~`,
+the replacement prints the full path.
+
 ## atuin
 
 Shell history in SQLite instead of `~/.bash_history`, with a searchable UI on
@@ -1061,6 +1293,114 @@ sudo apparmor_parser -r /etc/apparmor.d/termius
 Both attachment paths are globbed, so they survive rebuilds and version bumps
 and only need installing once. On NixOS this would be `security.wrappers`
 instead, in the configuration proper.
+
+## The root prompt
+
+`homeConfigurations.root` gives root the same prompt. This is the multi-user case
+the section below sketches, in practice: two users means **two Home Manager
+generations**, applied separately.
+
+`home/root.nix` imports `./bash.nix` and `./starship.nix` and nothing else. Both
+are user-agnostic — neither references a username or a user-specific path — so the
+two shells stay consistent instead of drifting. Verified: the generated
+`starship.toml` is byte-identical for both users.
+
+Deliberately *not* imported is `targets.genericLinux.enable`. It exists to put the
+Nix profiles into `XDG_DATA_DIRS` so desktop entries and icons are found, and it
+pulls in the `non-nixos-gpu` helper. A root shell needs neither.
+
+Root's generation writes eight files to `/root`: `.bashrc`, `.profile`,
+`.bash_profile`, `.config/starship.toml` and Home Manager's own bookkeeping.
+
+### Root is red
+
+gruvbox-rainbow sets `style_user` and `style_root` to the *same*
+`bg:color_orange fg:color_fg0`, so a root shell is indistinguishable at a glance.
+
+Fixing only `username.style_root` is not enough, and that was the first attempt:
+it turns the name red but leaves the distro icon in front of it and the triangle
+behind it orange, because those are the `$os` module and the separator — plain
+static styles. starship can only branch on the current UID inside the `username`
+module; everything else is fixed text.
+
+So the accent is decided at **evaluation** time instead, by which configuration is
+being built:
+
+```nix
+isRoot = config.home.username == "root";
+accent = if isRoot then "color_red" else "color_orange";
+```
+
+`home/root.nix` sets `home.username = "root"`, so the two generated
+`starship.toml` files differ in exactly three lines — verified by diffing them:
+
+| | christianhuth | root |
+|---|---|---|
+| leading cap and separator in `format` | `color_orange` | `color_red` |
+| `[os] style` | `bg:color_orange` | `bg:color_red` |
+| `[username] style_user` | `bg:color_orange` | `bg:color_red` |
+
+Confirmed down to the escape codes: `214;93;14` versus `204;36;29`.
+
+`username.style_root` is kept red independently of `accent`, as a fallback for a
+shell that runs *this* user's configuration while being root — `sudo -s` keeps
+`HOME` under Ubuntu's default sudoers. In that case the name goes red but the
+surrounding segment stays orange, which cannot be helped from the configuration.
+`sudo -i` is the clean way in.
+
+### Applying it
+
+Root's switch is separate and has to run as root:
+
+```bash
+sudo env PATH=/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
+  /nix/var/nix/profiles/default/bin/nix run home-manager/release-26.05 \
+  -- switch -b backup --flake /home/christianhuth/code/christianhuth/nix-config#root
+```
+
+`-b backup` is needed on the **first** root switch for the same reason it was for
+christianhuth: Ubuntu ships `/root/.profile` and `/root/.bashrc` from
+`/etc/skel`, and Home Manager refuses to replace existing files. They end up as
+`.profile.backup` and `.bashrc.backup`.
+
+Nothing is lost by that. Root's `sbin` PATH does not come from those files —
+`/etc/profile` on this system only sets `PS1`, and the PATH comes from
+`/etc/environment` via PAM, which Home Manager does not touch.
+
+Both halves of that are needed, and calling `nix` by absolute path alone is not
+enough — that fails with:
+
+```
+home-manager: line 594: nix: command not found
+```
+
+sudo's `secure_path` does not contain the Nix profile, and **two** things
+downstream look `nix` up by name:
+
+* the `home-manager` script sets its own PATH (coreutils, jq, gnused, …) but
+  deliberately leaves nix out, expecting it to be there already — then calls
+  `nix` 62 times plus `nix-build`, `nix-env`, `nix-instantiate` and `nix-store`;
+* the generation's `activate` script derives its nix directory from
+  `$(dirname $(readlink -m $(type -p nix-env)))`, so without `nix-env` on PATH it
+  puts a garbage entry there and every nix call fails.
+
+`env` is found through `secure_path`, sets PATH for the whole process tree and
+then execs nix. `/usr/bin:/bin` is included for the activation's system tools;
+the user's own profile is deliberately *not* on that PATH, so root does not end
+up running binaries out of `~christianhuth`.
+
+The flake path is absolute because root's working directory is not this
+repository. Reading a repository owned by another user works — `sudo nix profile
+add .#system-packages` has been doing it all along.
+
+A permanent alternative is putting the Nix profile into sudo's `secure_path`,
+which would also shorten the layer-1 commands. Do it through
+`sudo visudo -f /etc/sudoers.d/nix` so the syntax is validated before saving, and
+copy the existing value first (`sudo grep secure_path /etc/sudoers`) — the
+directive replaces rather than appends, and a malformed sudoers file locks sudo.
+
+The cost of this arrangement: forgetting root's switch lets it drift from the
+user's. There is no mechanism here that applies both at once.
 
 ## Can Nix manage users?
 

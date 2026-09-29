@@ -18,9 +18,11 @@
     ./bash.nix # bash itself + ~/.bashrc, ~/.profile, ~/.bash_profile
     ./code.nix # ~/code directory layout + the ansible .envrc
     ./direnv.nix # direnv + nix-direnv (needs bash.nix for its hook)
+    ./fonts.nix # fontconfig + the Nerd Font starship needs
     ./git.nix # git + its configuration
     ./gnupg.nix # pass, gnupg, and GPG_TTY
     ./kubeswitch.nix # kubeswitch (needs bash.nix for its shell function)
+    ./starship.nix # prompt (owns PS1; see bash.nix)
     ./krew.nix # krew + its plugins
     ./vscodium.nix # VSCodium + extensions
     ./wireguard.nix # wireguard-tools + NetworkManager import

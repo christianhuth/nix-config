@@ -13,6 +13,15 @@
       # Make Home Manager use exactly the same nixpkgs as above.
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # VSCodium extensions. nixpkgs' vscode-extensions set lags badly on some of
+    # them -- gitlens sat at 17.11.1 there while upstream was at 19.2.0 -- and
+    # that gap is what let VSCodium overrule the declared versions. This flake
+    # mirrors Open VSX and the VS Code marketplace daily. See home/vscodium.nix.
+    nix-vscode-extensions = {
+      url = "github:nix-community/nix-vscode-extensions";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -20,6 +29,7 @@
       nixpkgs,
       nixpkgs-unstable,
       home-manager,
+      nix-vscode-extensions,
       ...
     }:
     let
@@ -38,8 +48,17 @@
         inherit system;
         config.allowUnfree = true;
 
-        # Our own packages and overrides -- see pkgs/overlay.nix.
-        overlays = [ (import ./pkgs/overlay.nix { inherit unstable; }) ];
+        overlays = [
+          # Our own packages and overrides.
+          (import ./pkgs/overlay.nix { inherit unstable; })
+
+          # Adds open-vsx{,-release}, vscode-marketplace{,-release} and friends
+          # to pkgs. Applied as an overlay rather than reading the flake's
+          # `extensions` output directly, because that output is built from the
+          # flake's own nixpkgs instance -- which has no allowUnfree, and the
+          # Claude Code extension is unfree. Going through our pkgs fixes that.
+          nix-vscode-extensions.overlays.default
+        ];
       };
 
       systemPackages = import ./system/packages.nix { inherit pkgs; };
@@ -69,6 +88,20 @@
         modules = [ ./home/default.nix ];
 
         extraSpecialArgs = { inherit username; };
+      };
+
+      # === root ==========================================================
+      # Only the shell and the prompt -- see home/root.nix. This is a separate
+      # Home Manager generation under /root and has to be applied as root:
+      #
+      #   sudo /nix/var/nix/profiles/default/bin/nix run home-manager/release-26.05 \
+      #     -- switch --flake /home/christianhuth/code/christianhuth/nix-config#root
+      #
+      # The absolute paths are not decoration: sudo's secure_path contains neither
+      # the Nix profile nor christianhuth's, and root's cwd is not this repository.
+      homeConfigurations.root = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [ ./home/root.nix ];
       };
     };
 }

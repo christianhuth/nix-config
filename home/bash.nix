@@ -51,13 +51,22 @@
         alias egrep='egrep --color=auto'
       fi
 
-      # Ubuntu's coloured prompt. The debian_chroot prefix is dropped: there is
-      # no /etc/debian_chroot here, so it only ever expanded to nothing.
-      PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
-
-      # Put user@host: cwd into the terminal window title.
+      # No PS1 here any more: home/starship.nix owns the prompt. Its init is
+      # injected with lib.mkOrder 1900, i.e. after this block at the default
+      # 1000, so anything set here would be overwritten anyway.
+      #
+      # The window title still has to live somewhere, and it cannot ride along
+      # in PS1 for the same reason. PROMPT_COMMAND works instead: starship's
+      # init preserves an existing one rather than clobbering it -- it moves the
+      # value to STARSHIP_PROMPT_COMMAND and evaluates that from its own
+      # starship_precmd.
+      #
+      # Slight difference to the old PS1 version: \w abbreviated $HOME as "~",
+      # this prints the full path.
       case "$TERM" in
-        xterm*|rxvt*) PS1="\[\e]0;\u@\h: \w\a\]$PS1" ;;
+        xterm*|rxvt*)
+          PROMPT_COMMAND='printf "\033]0;%s@%s: %s\007" "$USER" "$HOSTNAME" "$PWD"'
+          ;;
       esac
     '';
   };
