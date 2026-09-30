@@ -55,10 +55,21 @@
         # VSCodium's terminal while looking correct in Ptyxis.
         "terminal.integrated.fontFamily" = "'FiraCode Nerd Font Mono', monospace";
 
+        # Claude in the right-hand secondary side bar, full height. The
+        # extension's own enum is ['sidebar', 'panel'] with descriptions
+        # "Sidebar (Right)" and "Panel (New Tab)"; `panel` was opening it as an
+        # editor tab, which put it beside the editor and made the terminal span
+        # underneath both.
+        #
+        # Careful: the extension documents this setting as one it "updates
+        # automatically when you open Claude in a new location" -- and it cannot,
+        # because settings.json is a read-only store symlink here. Moving Claude
+        # through the UI will not stick; this value is the source of truth.
+        "claudeCode.preferredLocation" = "sidebar";
+
         # Pre-existing, kept as they were.
         "claudeCode.focusView" = false;
         "claudeCode.hideOnboarding" = true;
-        "claudeCode.preferredLocation" = "panel";
         "explorer.confirmDelete" = false;
         "explorer.confirmDragAndDrop" = false;
       };
