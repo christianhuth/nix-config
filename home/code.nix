@@ -34,9 +34,9 @@ let
   # only for a repository that has to sit on a specific branch, e.g.
   #   "proact/ansible/base" = { url = "..."; branch = "stable-20260626"; };
   repos = {
-    "proact/ansible/base".url = "https://gitlab.proact.eu/paas/pmcp-base.git";
-    "proact/ansible/operational-scripts".url = "https://gitlab.proact.eu/paas/operational-scripts.git";
-    "proact/ansible/site".url = "https://gitlab.proact.eu/paas/site.git";
+    "proact/ansible/base".url = "https://https://forgejo.160f93e3-44a9-4676-bb3c-f98a216e1918.pmcp.proact.eu/devops/pmcp-base.git";
+    "proact/ansible/operational-docs".url = "https://https://forgejo.160f93e3-44a9-4676-bb3c-f98a216e1918.pmcp.proact.eu/devops/operational-docs.git";
+    "proact/ansible/site".url = "https://https://forgejo.160f93e3-44a9-4676-bb3c-f98a216e1918.pmcp.proact.eu/devops/pmcp-site.git";
   };
 
   cloner = pkgs.writeShellApplication {
@@ -145,7 +145,7 @@ in
       layout_python3
 
       export ANSIBLE_BECOME_PASS=$(pass show proact/ssh-password | head -n 1)
-      export ANSIBLE_VAULT_PASSWORD_FILE=$(pwd)/operational-scripts/bin/ansible-vault-password.sh
+      export ANSIBLE_VAULT_PASSWORD_FILE=$(pwd)/operational-docs/scripts/bin/ansible-vault-password.sh
     '';
   };
 }

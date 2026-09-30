@@ -747,16 +747,16 @@ activation script is the right answer for "make sure this one is there".
 
 | Path below `~/code` | Repository |
 |---|---|
-| `proact/ansible/base` | `paas/pmcp-base.git` |
-| `proact/ansible/operational-scripts` | `paas/operational-scripts.git` |
-| `proact/ansible/site` | `paas/site.git` |
+| `proact/ansible/base` | `devops/pmcp-base.git` |
+| `proact/ansible/operational-docs` | `devops/operational-docs.git` |
+| `proact/ansible/site` | `devops/pmcp-site.git` |
 
 All three take the remote's default branch. `branch` is an optional per-repository
 attribute for the case where a specific one is needed:
 
 ```nix
 "proact/ansible/base" = {
-  url = "https://gitlab.proact.eu/paas/pmcp-base.git";
+  url = "https://forgejo.160f93e3-44a9-4676-bb3c-f98a216e1918.pmcp.proact.eu/devops/pmcp-base.git";
   branch = "stable-20260626";
 };
 ```
@@ -792,7 +792,7 @@ it contains no secret itself — it *fetches* one via
 layout_python3
 
 export ANSIBLE_BECOME_PASS=$(pass show proact/ssh-password | head -n 1)
-export ANSIBLE_VAULT_PASSWORD=$(pwd)/operational-scripts/bin/ansible-vault-password.sh
+export ANSIBLE_VAULT_PASSWORD=$(pwd)/operational-docs/scripts/bin/ansible-vault-password.sh
 ```
 
 Verified byte-identical to what was there before.
