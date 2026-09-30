@@ -26,21 +26,27 @@ in
   # Note the consequence of managing it here: the file becomes a symlink into
   # the Nix store and is therefore read-only. New hosts get added in this file
   # and applied with `home-manager switch`, not by editing ~/.config directly.
+  # About `username_extractor` / `username`, which both entries below use: without
+  # them the helper returns only `password=`, and git has to ask for the username
+  # unless it happens to be in the clone URL. The `static` strategy takes the
+  # username straight from this mapping, which suits entries that contain nothing
+  # but a token.
+  #
+  # The alternative is keeping the username in the store entry itself: add it as a
+  # second line and use the default `specific_line` extractor, or `regex_search`
+  # with `regex_username=^login: (.*)$` for a prefixed line. That keeps credential
+  # and identity together but needs a manual `pass edit` per entry instead of a
+  # line of Nix.
   xdg.configFile."pass-git-helper/git-pass-mapping.ini".source =
     ini.generate "git-pass-mapping.ini" {
+      "forgejo.160f93e3-44a9-4676-bb3c-f98a216e1918.pmcp.proact.eu*" = {
+        target = "proact/forgejo";
+        username_extractor = "static";
+        username = "christian";
+      };
+
       "gitlab.proact.eu*" = {
         target = "proact/gitlab.proact.eu";
-
-        # Without this the helper returns only `password=`, and git has to ask
-        # for the username unless it happens to be in the clone URL. The
-        # `static` strategy takes the username straight from this mapping, which
-        # suits an entry that contains nothing but the token.
-        #
-        # The alternative is keeping the username in the store entry itself: add
-        # it as a second line and use the default `specific_line` extractor, or
-        # `regex_search` with `regex_username=^login: (.*)$` for a prefixed
-        # line. That keeps credential and identity together but needs a manual
-        # `pass edit` per entry instead of a line of Nix.
         username_extractor = "static";
         username = "christian.huth";
       };
