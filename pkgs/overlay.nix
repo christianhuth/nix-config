@@ -14,4 +14,11 @@ final: prev: {
   # stops working. Track unstable for this one and refresh with `nix flake
   # update` -- the versions in stable are regularly too old to be usable.
   inherit (unstable) signal-desktop;
+
+  # devenv moves fast and nixpkgs 26.05 sits at 2.1.2 while upstream released
+  # 2.4.0 (2026-09-24), which is exactly what unstable carries. Three minor
+  # versions matter here because devenv.nix options and the module schema change
+  # between them -- an old binary rejects a current devenv.nix with a version
+  # error rather than degrading gracefully.
+  inherit (unstable) devenv;
 }

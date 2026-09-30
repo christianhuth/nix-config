@@ -31,6 +31,7 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/atuin.nix`      | atuin shell history, local only                                       | `christianhuth` |
 | `home/bash.nix`       | bash, and the generated `~/.bashrc`, `~/.profile`, `~/.bash_profile`  | `christianhuth` |
 | `home/code.nix`       | ~/code directory layout + the managed ansible .envrc                  | `christianhuth` |
+| `home/devenv.nix`     | devenv, and why it stays out of direnv lib/                           | `christianhuth` |
 | `home/direnv.nix`     | direnv + nix-direnv                                                   | `christianhuth` |
 | `home/fonts.nix`      | fontconfig for the Nix profile + the Nerd Font starship needs         | `christianhuth` |
 | `home/git.nix`        | git and its configuration                                             | `christianhuth` |
@@ -1109,6 +1110,67 @@ The database starts empty; `~/.bash_history` is not read automatically. One-time
 ```bash
 atuin import auto
 ```
+
+## devenv
+
+`pkgs.devenv` comes from **nixos-unstable** through `pkgs/overlay.nix`, the same
+route as signal-desktop. nixpkgs 26.05 sits at 2.1.2 while upstream released 2.4.0
+on 2026-09-24, which is exactly what unstable carries. Three minor versions matter
+for this tool: `devenv.nix` options and the module schema change between them, and
+an old binary rejects a current `devenv.nix` with a version error rather than
+degrading gracefully.
+
+Verified in the profile: `devenv-2.4.0`.
+
+### It is not wired into direnv
+
+`devenv direnvrc` exists, and `home/direnv.nix` puts nix-direnv's equivalent into
+`~/.config/direnv/lib/`, so the obvious move would be to do the same here. That
+would break `use flake`.
+
+devenv's direnvrc describes itself as "adapted from nix-community/nix-direnv", and
+it redefines three of nix-direnv's functions:
+
+```
+_nix_direnv_preflight
+_nix_export_or_unset
+_nix_import_env
+```
+
+direnv sources `~/.config/direnv/lib/*.sh` in glob order, so whichever file sorts
+last wins all three. Neither order is safe:
+
+| Order | Consequence |
+|---|---|
+| `devenv.sh` before `hm-nix-direnv.sh` | `use_devenv` silently runs nix-direnv's preflight, which checks for `nix` rather than `devenv` |
+| `devenv.sh` after | `use flake` -- which this repository's own `.envrc` pattern relies on -- loses its helpers |
+
+So devenv's direnvrc belongs in the `.envrc` of the project that wants it, where its
+definitions are scoped to that one evaluation:
+
+```bash
+source_url "https://raw.githubusercontent.com/cachix/devenv/v2.4.0/direnvrc" \
+  "sha256-..."
+use devenv
+```
+
+A project uses either `use flake` or `use devenv`, never both, so scoping it per
+project costs nothing. Confirmed after the change: `~/.config/direnv/lib/` still
+contains only `hm-nix-direnv.sh`.
+
+### The binary cache cannot be added from here
+
+devenv's documentation recommends `https://devenv.cachix.org` as a substituter. That
+is not reachable from this configuration:
+
+```
+$ nix config show trusted-users
+root
+```
+
+A non-root user's `substituters` are ignored unless the user is trusted, so this
+needs `/etc/nix/nix.conf`. Worth doing only if devenv turns out to build a lot
+locally -- devenv itself arrives prebuilt from `cache.nixos.org`.
 
 ## direnv
 
