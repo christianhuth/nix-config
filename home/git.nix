@@ -1,4 +1,9 @@
-{ lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 {
   programs.git = {
@@ -98,9 +103,23 @@
     includes = [
       {
         condition = "gitdir:~/code/proact/";
-        contents.user = {
-          name = "Christian Huth";
-          email = "christian.huth@proact.eu";
+        contents = {
+          user = {
+            name = "Christian Huth";
+            email = "christian.huth@proact.eu";
+            # The work GPG key; its UID carries the same address as user.email
+            # above, which Forgejo requires to mark a commit as "Verified".
+            signingKey = "175F8A4C86918611";
+          };
+
+          # Sign only work commits and tags -- private repositories stay
+          # unsigned, which is why this lives here and not in `settings`.
+          commit.gpgSign = true;
+          tag.gpgSign = true;
+
+          # Use the gpg from home/gnupg.nix, the one talking to the Nix-managed
+          # gpg-agent, instead of whichever `gpg` comes first in PATH.
+          gpg.program = lib.getExe config.programs.gpg.package;
         };
       }
     ];
