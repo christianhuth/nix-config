@@ -792,7 +792,7 @@ it contains no secret itself — it *fetches* one via
 layout_python3
 
 export ANSIBLE_BECOME_PASS=$(pass show proact/ssh-password | head -n 1)
-export ANSIBLE_VAULT_PASSWORD=$(pwd)/operational-docs/scripts/bin/ansible-vault-password.sh
+export ANSIBLE_VAULT_PASSWORD=$(pwd)/operational-docs/scripts/ansible-vault-password.sh
 ```
 
 Verified byte-identical to what was there before.
