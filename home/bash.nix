@@ -32,7 +32,7 @@
     # (10000 / 100000) are already more generous than Ubuntu's 1000 / 2000.
     historyControl = [ "ignoreboth" ];
 
-    bashrcExtra = "eval '$(devenv hook bash)'";
+    bashrcExtra = "eval \"$(devenv hook bash)\"";
 
     shellAliases = {
       ll = "ls -alF";
