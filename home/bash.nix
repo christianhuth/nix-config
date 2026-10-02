@@ -32,8 +32,6 @@
     # (10000 / 100000) are already more generous than Ubuntu's 1000 / 2000.
     historyControl = [ "ignoreboth" ];
 
-    bashrcExtra = "eval \"$(devenv hook bash)\"";
-
     shellAliases = {
       ll = "ls -alF";
       la = "ls -A";
@@ -70,6 +68,8 @@
           PROMPT_COMMAND='printf "\033]0;%s@%s: %s\007" "$USER" "$HOSTNAME" "$PWD"'
           ;;
       esac
+
+      eval "$(devenv hook bash)"
     '';
   };
 
