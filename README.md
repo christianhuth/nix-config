@@ -31,6 +31,7 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | `home/atuin.nix`      | atuin shell history, local only                                       | `christianhuth` |
 | `home/bash.nix`       | bash, and the generated `~/.bashrc`, `~/.profile`, `~/.bash_profile`  | `christianhuth` |
 | `home/code.nix`       | ~/code directory layout + the managed ansible .envrc                  | `christianhuth` |
+| `home/ddev.nix`       | ddev + mkcert, and the Docker prerequisite apt has to cover           | `christianhuth` |
 | `home/devenv.nix`     | devenv, and why it stays out of direnv lib/                           | `christianhuth` |
 | `home/direnv.nix`     | direnv + nix-direnv                                                   | `christianhuth` |
 | `home/fonts.nix`      | fontconfig for the Nix profile + the Nerd Font starship needs         | `christianhuth` |
@@ -1110,6 +1111,187 @@ The database starts empty; `~/.bash_history` is not read automatically. One-time
 ```bash
 atuin import auto
 ```
+
+## ddev
+
+`pkgs.ddev` from 26.05 (1.25.3 against 1.25.4 upstream -- a single patch, so the
+stable channel is fine here, unlike devenv). It provides `ddev`, `ddev-hostname`
+and `ddev_gen_autocomplete`.
+
+`mkcert` comes along with it. That is not scope creep: ddev uses it to create a
+local CA so `*.ddev.site` gets trusted HTTPS, ddev does not bundle it, and the
+package's closure carries only `docker-buildx` -- neither docker nor mkcert.
+
+### Docker has to come from apt
+
+ddev is a thin orchestrator on top of a container runtime, and Nix cannot supply
+one here. `pkgs.docker` does exist and includes the daemon, but a daemon on Ubuntu
+means a systemd unit and a root-owned socket -- the same wall as `pcscd` in
+`home/yubikey.nix`. So the runtime is apt's, and only the runtime.
+
+Ubuntu's `docker.io` (29.1.3) rather than Docker CE from Docker's own repository.
+ddev's docs prefer Docker CE, and the honest version of that trade is: `docker.io`
+is one major behind at most, is covered by Ubuntu's security updates, and -- the
+part that decided it -- it ships the rootless scripts, see below.
+
+### Rootless, not the docker group
+
+The obvious move is `usermod -aG docker "$USER"`, and it is the wrong one. The
+`docker` group is not a "non-root docker" switch: anyone in it can ask the
+root-owned daemon to bind-mount `/` into a privileged container, so it is
+root-equivalent and Docker documents it as such. Rootless mode is the actual
+answer -- the daemon runs as christianhuth inside a user namespace, so a container
+escape lands on an unprivileged user rather than on root.
+
+The costs are real and worth knowing up front: ports below 1024 need a sysctl (see
+below), networking goes through slirp4netns and so is slower than a bridge, and
+`--privileged`, host networking and cgroup limits are restricted. For ddev none of
+that matters -- it binds 8080/8443-style ports and needs no privileged containers.
+
+ddev supports this explicitly, not incidentally: the binary carries
+`IsDockerRootless`, `getDockerRootlessHostIP` and a RootlessKit network-driver
+probe over `docker version`, and it names the context in its own error text
+(`Check: DOCKER_CONTEXT=rootless docker ps`).
+
+### Setting it up
+
+What was already in place on this machine, verified rather than assumed:
+
+| Prerequisite | State |
+| --- | --- |
+| `/etc/subuid`, `/etc/subgid` | `christianhuth:100000:65536` |
+| cgroup v2 with delegation | `cpu memory pids` under `user@1000.service` |
+| `/etc/apparmor.d/rootlesskit` | present, `flags=(unconfined)` with `userns` |
+| data-root filesystem | ext4, kernel 7.0 -> native overlay2 in a userns |
+
+That AppArmor profile is the one thing that usually bites on Ubuntu 24.04+.
+`kernel.apparmor_restrict_unprivileged_userns=1` means an *unconfined* program
+creating a user namespace transitions into `/etc/apparmor.d/unprivileged_userns`,
+which carries `audit deny capability` -- fatal for a container runtime. Docker's
+own instructions therefore have you hand-write a profile for `~/bin/rootlesskit`.
+Not needed here: Ubuntu's `apparmor` package already ships a `rootlesskit` profile
+naming exactly apt's `/usr/bin/rootlesskit`, so it gets a named unconfined label
+instead of that transition. `fuse-overlayfs` is likewise unnecessary given ext4
+plus a 5.11+ kernel.
+
+```bash
+# 1. The pieces apt has to provide. uidmap and rootlesskit are hard
+#    requirements; one of slirp4netns/pasta/vpnkit is too -- dockerd-rootless.sh
+#    aborts without any of them.
+sudo apt install docker.io uidmap rootlesskit slirp4netns
+
+# 2. Leave the docker group -- it is root-equivalent and nothing below needs it.
+sudo gpasswd -d "$USER" docker
+
+# 3. Stop the rootful daemon. Both units are needed -- the socket would
+#    re-activate the service on first use. This is also what unblocks the setup
+#    tool in step 5: its guard is `[ -w /var/run/docker.sock ]`, and stopping the
+#    units removes that socket.
+sudo systemctl disable --now docker.service docker.socket
+
+# 4. Log out and back in. Required twice over: the group change only applies to
+#    new sessions, and the setup tool needs a real login session for
+#    XDG_RUNTIME_DIR and the user systemd instance.
+
+# 5. Make the setup tool reachable, then run it. Ubuntu keeps the rootless
+#    scripts out of PATH under /usr/share/docker.io/contrib, and the tool needs
+#    its companion dockerd-rootless.sh on PATH. Symlink rather than prefix PATH
+#    -- see "The Ubuntu layout breaks the setup tool" below for why that matters.
+sudo ln -s /usr/share/docker.io/contrib/dockerd-rootless.sh /usr/bin/dockerd-rootless.sh
+dockerd-rootless-setuptool.sh install
+
+# 6. Start it, and keep it running when no session is open.
+systemctl --user enable --now docker
+sudo loginctl enable-linger "$USER"
+
+# 7. The local CA for *.ddev.site, once.
+mkcert -install
+```
+
+Step 5 also creates a docker CLI context called `rootless` and makes it current,
+which is why no `DOCKER_HOST` appears anywhere in this repository -- see below.
+
+### The Ubuntu layout breaks the setup tool
+
+Worth knowing, because the first attempt here hit it. The tool resolves its own
+install directory from where it finds its companion script:
+
+```sh
+BIN="$(command -v dockerd-rootless.sh)"; BIN=$(dirname "$BIN")
+```
+
+and then calls `"${BIN}/docker"` -- both for the readiness wait and for all three
+context helpers (`context inspect`, `context create`, `context use`). Upstream that
+holds, because Docker CE's rootless-extras put `docker` and `dockerd-rootless.sh`
+in the same `~/bin`. Ubuntu splits them: `docker` is in `/usr/bin`, the scripts are
+in `/usr/share/docker.io/contrib`.
+
+So prefixing PATH with the contrib directory -- the obvious move -- sets
+`BIN=/usr/share/docker.io/contrib`, where no `docker` binary exists. The systemd
+unit is still written and started correctly, since that happens earlier and uses
+the absolute path, but the context step fails silently and you end up with a
+working daemon and only a `default` context. Symlinking into `/usr/bin` instead
+makes `BIN=/usr/bin`, where both binaries resolve, and the whole tool runs through.
+
+If you already have that half-finished state, the two commands the tool would
+have run are enough -- no reinstall:
+
+```bash
+docker context create rootless --docker "host=unix:///run/user/$(id -u)/docker.sock" --description "Rootless mode"
+docker context use rootless
+```
+
+Verify:
+
+```bash
+docker context ls          # "rootless" carries the * marker
+docker info -f '{{.SecurityOptions}}'   # contains name=rootless
+docker run --rm hello-world
+ddev list
+```
+
+### Ports below 1024
+
+`net.ipv4.ip_unprivileged_port_start` is 1024 here, and a rootless daemon cannot
+bind below it. Two ways out, and the second is the better one:
+
+```bash
+# Either: let unprivileged processes bind from port 80 on. ddev documents this
+# exact snippet, but it lowers the limit for every process on the machine.
+echo 'net.ipv4.ip_unprivileged_port_start=0' | sudo tee /etc/sysctl.d/60-rootless.conf
+sudo sysctl --system
+
+# Or: move ddev's router up, and change nothing system-wide.
+ddev config global --router-http-port=8080 --router-https-port=8443
+```
+
+ddev 1.25.3 is also past the window where rootless needed
+`ddev config global --no-bind-mounts` -- that applied to 1.25.0 through 1.25.2.
+
+### Why DOCKER_HOST is not set declaratively
+
+It would be the obvious thing to add to `home/ddev.nix`, and it is deliberately
+absent. The `rootless` CLI context carries the same information, and both tools
+read it -- confirmed rather than assumed:
+
+```
+$ ddev debug dockercheck
+Docker platform: linux-docker-rootless
+Using Docker context: rootless
+Using Docker host: unix:///run/user/1000/docker.sock
+```
+
+So the variable is redundant. It is also not inert: `DOCKER_HOST` takes precedence
+over the context, so a later `docker context use` would silently do nothing. And
+the context lives in `~/.docker`, which the CLI rewrites itself -- mutable state,
+left where it belongs, same reasoning as ddev's own config below.
+
+### Its config stays mutable
+
+ddev writes `~/.ddev/global_config.yaml`, `project_list.yaml` and a
+`homeadditions/` tree on first run, and rewrites them through `ddev config
+global`. None of that is declared here. Nix managing a file the tool itself keeps
+rewriting is the trap that already cost a round with atuin's `config.toml`.
 
 ## devenv
 
