@@ -17,6 +17,7 @@
     ./atuin.nix # atuin shell history (needs bash.nix for its integration)
     ./bash.nix # bash itself + ~/.bashrc, ~/.profile, ~/.bash_profile
     ./code.nix # ~/code directory layout + the ansible .envrc
+    ./containerlab.nix # containerlab (needs a rootful Docker, see the file)
     ./ddev.nix # ddev + mkcert (needs Docker from apt, see the file)
     ./devenv.nix # devenv (note: not wired into direnv's lib, see the file)
     ./direnv.nix # direnv + nix-direnv (needs bash.nix for its hook)

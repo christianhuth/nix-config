@@ -23,31 +23,32 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 
 ## Repository layout
 
-| File                  | What it defines                                                       | Applies to      |
-| --------------------- | --------------------------------------------------------------------- | --------------- |
-| `flake.nix`           | inputs (nixpkgs, Home Manager) and both outputs                       | —               |
-| `system/packages.nix` | system-wide packages, plus the Firefox pref                           | all users       |
-| `home/default.nix`    | **the per-user package list** (`home.packages`) and the imports below | `christianhuth` |
-| `home/atuin.nix`      | atuin shell history, local only                                       | `christianhuth` |
-| `home/bash.nix`       | bash, and the generated `~/.bashrc`, `~/.profile`, `~/.bash_profile`  | `christianhuth` |
-| `home/code.nix`       | ~/code directory layout + the managed ansible .envrc                  | `christianhuth` |
-| `home/ddev.nix`       | ddev + mkcert, and the Docker prerequisite apt has to cover           | `christianhuth` |
-| `home/devenv.nix`     | devenv, and why it stays out of direnv lib/                           | `christianhuth` |
-| `home/direnv.nix`     | direnv + nix-direnv                                                   | `christianhuth` |
-| `home/fonts.nix`      | fontconfig for the Nix profile + the Nerd Font starship needs         | `christianhuth` |
-| `home/git.nix`        | git and its configuration                                             | `christianhuth` |
-| `home/gnupg.nix`      | pass, gnupg, and the GPG_TTY export                                   | `christianhuth` |
-| `home/kubeswitch.nix` | kubeswitch and its shell function                                     | `christianhuth` |
-| `home/root.nix`       | entry point for the root user: shell + prompt only                    | `root`          |
-| `home/starship.nix`   | the shell prompt (owns PS1; see home/bash.nix)                        | `christianhuth` |
-| `home/wireguard.nix`  | wireguard-tools + import of ~/.wireguard/*.conf into NetworkManager   | `christianhuth` |
-| `home/yubikey.nix`    | ykman, plus what Ubuntu has to provide around it                      | `christianhuth` |
-| `home/krew.nix`       | krew and its plugins                                                  | `christianhuth` |
-| `home/vscodium.nix`   | VSCodium and its extensions                                           | `christianhuth` |
-| `pkgs/overlay.nix`    | our own packages and overrides, applied on top of nixpkgs             | both layers     |
-| `pkgs/termius/…`      | Termius built from the vendor's official `.deb`                       | `christianhuth` |
-| `system/apparmor/…`   | AppArmor profiles granting `userns` (see “Electron on Ubuntu”)        | all users       |
-| `BOOTSTRAP.md`        | one-time setup of Nix itself                                          | —               |
+| File                    | What it defines                                                       | Applies to      |
+| ----------------------- | --------------------------------------------------------------------- | --------------- |
+| `flake.nix`             | inputs (nixpkgs, Home Manager) and both outputs                       | —               |
+| `system/packages.nix`   | system-wide packages, plus the Firefox pref                           | all users       |
+| `home/default.nix`      | **the per-user package list** (`home.packages`) and the imports below | `christianhuth` |
+| `home/atuin.nix`        | atuin shell history, local only                                       | `christianhuth` |
+| `home/bash.nix`         | bash, and the generated `~/.bashrc`, `~/.profile`, `~/.bash_profile`  | `christianhuth` |
+| `home/code.nix`         | ~/code directory layout + the managed ansible .envrc                  | `christianhuth` |
+| `home/containerlab.nix` | containerlab, and why it needs a rootful Docker                       | `christianhuth` |
+| `home/ddev.nix`         | ddev + mkcert, and the Docker prerequisite apt has to cover           | `christianhuth` |
+| `home/devenv.nix`       | devenv, and why it stays out of direnv lib/                           | `christianhuth` |
+| `home/direnv.nix`       | direnv + nix-direnv                                                   | `christianhuth` |
+| `home/fonts.nix`        | fontconfig for the Nix profile + the Nerd Font starship needs         | `christianhuth` |
+| `home/git.nix`          | git and its configuration                                             | `christianhuth` |
+| `home/gnupg.nix`        | pass, gnupg, and the GPG_TTY export                                   | `christianhuth` |
+| `home/kubeswitch.nix`   | kubeswitch and its shell function                                     | `christianhuth` |
+| `home/root.nix`         | entry point for the root user: shell + prompt only                    | `root`          |
+| `home/starship.nix`     | the shell prompt (owns PS1; see home/bash.nix)                        | `christianhuth` |
+| `home/wireguard.nix`    | wireguard-tools + import of ~/.wireguard/*.conf into NetworkManager   | `christianhuth` |
+| `home/yubikey.nix`      | ykman, plus what Ubuntu has to provide around it                      | `christianhuth` |
+| `home/krew.nix`         | krew and its plugins                                                  | `christianhuth` |
+| `home/vscodium.nix`     | VSCodium and its extensions                                           | `christianhuth` |
+| `pkgs/overlay.nix`      | our own packages and overrides, applied on top of nixpkgs             | both layers     |
+| `pkgs/termius/…`        | Termius built from the vendor's official `.deb`                       | `christianhuth` |
+| `system/apparmor/…`     | AppArmor profiles granting `userns` (see “Electron on Ubuntu”)        | all users       |
+| `BOOTSTRAP.md`          | one-time setup of Nix itself                                          | —               |
 
 ### Where are the per-user packages?
 

@@ -21,4 +21,10 @@ final: prev: {
   # between them -- an old binary rejects a current devenv.nix with a version
   # error rather than degrading gracefully.
   inherit (unstable) devenv;
+
+  # containerlab: 26.05 carries 0.71.0, unstable 0.78.2. The node images it
+  # starts are built from vrnetlab's master branch (see homelab/network/lab),
+  # and vrnetlab and containerlab change together -- an old containerlab
+  # against a current vrnetlab image is the combination nobody tests.
+  inherit (unstable) containerlab;
 }
