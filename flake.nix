@@ -79,30 +79,42 @@
 
       # === NixOS =======================================================
       # Every directory under hosts/ is one machine: the installer's
-      # configuration.nix and hardware-configuration.nix, copied in verbatim
-      # (see hosts/README.md). Naming the directory after the hostname means
-      # `sudo nixos-rebuild switch --flake .` picks it without a #name.
+      # configuration.nix and hardware-configuration.nix, copied in verbatim, plus
+      # users.nix (see hosts/README.md). Naming the directory after the hostname
+      # means `sudo nixos-rebuild switch --flake .` picks it without a #name.
       hosts = lib.attrNames (
         lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./hosts)
       );
 
+      # A feature name resolves to one Home Manager module. This is the whole
+      # indirection: hosts/<hostname>/users.nix lists names, nothing else.
+      featureModule = name: ./home/features + "/${name}.nix";
+
       mkHost =
         hostname:
+        let
+          # { <user> = [ "feature" ... ]; } -- which users this machine has, and
+          # what each of them gets on it. The same user can carry a different set
+          # on a different machine; that is the point of keeping it here rather
+          # than in users/ or home/.
+          hostUsers = import (./hosts + "/${hostname}/users.nix");
+        in
         lib.nixosSystem {
-          # So system/nixos.nix can name the user without hardcoding it. Step 3 of
-          # the modularisation replaces this with a per-host user set; until then
-          # there is exactly one user and one place that defines its name.
-          specialArgs = { inherit username; };
-
           modules = [
             # Machine-specific, from the installer: boot loader, LUKS devices,
-            # file systems, locale, desktop, the user account.
+            # file systems, locale, desktop, the user accounts.
             (./hosts + "/${hostname}/configuration.nix")
 
             # Shared system layer -- what apt and the manual steps in
             # README.md did on Ubuntu.
             ./system/nixos.nix
+          ]
 
+          # System-level identity (uid, gid, groups) for each user on this
+          # machine. Shared across machines, hence users/ and not hosts/.
+          ++ map (name: ./users + "/${name}.nix") (lib.attrNames hostUsers)
+
+          ++ [
             home-manager.nixosModules.home-manager
             {
               # Deliberately NOT `nixpkgs.pkgs = pkgs`: the installer writes
@@ -122,15 +134,30 @@
                 # Same job as `-b backup` on Ubuntu, but for every switch.
                 backupFileExtension = "backup";
 
-                extraSpecialArgs = {
-                  inherit username;
-                  isNixOS = true;
-                };
+                # `username` is NOT passed here on purpose -- it is set per user
+                # below, so a module can never see a different user's name. Only
+                # the standalone Ubuntu output, which has exactly one user, passes
+                # it as a specialArg.
+                extraSpecialArgs.isNixOS = true;
 
-                # Both users in ONE `nixos-rebuild switch` -- the separate,
+                # Every user gets the shared base plus their own features. All
+                # users in ONE `nixos-rebuild switch` -- the separate,
                 # easy-to-forget root switch from Ubuntu is gone.
-                users.${username} = ./home/default.nix;
-                users.root = ./home/root.nix;
+                users =
+                  lib.mapAttrs (name: features: {
+                    imports = [ ./home/default.nix ] ++ map featureModule features;
+
+                    # The right name for *this* user. Home Manager's NixOS module
+                    # also derives home.username and home.homeDirectory from
+                    # users.users.<name>; both definitions agree, and `types.str`
+                    # merges equal values, so this stays a cross-check rather than
+                    # a conflict. It would fail loudly if a home directory were
+                    # ever not /home/<name>.
+                    _module.args.username = name;
+                  }) hostUsers
+                  // {
+                    root = ./home/root.nix;
+                  };
               };
             }
           ];

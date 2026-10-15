@@ -9,12 +9,36 @@ most of the rest of this README was written on Ubuntu and still describes it.
 
 One flake output per machine, `nixosConfigurations.<hostname>`, built from:
 
-| Piece                              | From                                                                 |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| `hosts/<hostname>/*.nix`           | the installer's two files, copied verbatim — see `hosts/README.md`   |
-| `system/nixos.nix`                 | the shared system layer: what apt and the manual steps did on Ubuntu |
-| `system/packages.nix`              | layer 1, now as `environment.systemPackages`                         |
-| `home/default.nix`, `home/root.nix` | Home Manager as a NixOS module, both users in the same switch       |
+| Piece | From |
+| ------------------------------ | -------------------------------------------------------------------- |
+| `hosts/<hostname>/*.nix` | the installer's two files, copied verbatim — see `hosts/README.md` |
+| `hosts/<hostname>/users.nix` | **which users this machine has, and which features each one gets** |
+| `users/<name>.nix` | that user's system-level identity: uid, gid, group membership |
+| `home/default.nix` | the shared base every user imports |
+| `home/features/<name>.nix` | one feature, selected by name per user per machine |
+| `system/nixos.nix` | the shared system layer: what apt and the manual steps did on Ubuntu |
+| `system/packages.nix` | layer 1, now as `environment.systemPackages` |
+| `home/root.nix` | root's shell and prompt, added to every host automatically |
+
+The three dimensions are kept apart on purpose: **who** a user is (`users/`) is the
+same on every machine, **what** they get (`home/features/`) is a library, and
+**which of it applies where** (`hosts/<hostname>/users.nix`) is per machine. So
+
+```nix
+# hosts/laptop1/users.nix
+{
+  christianhuth = [ "git" "vscodium" ];
+  huthcn        = [ "bitwarden" "plex" ];
+}
+```
+
+gives the same user a different set on `laptop2` without duplicating either the
+identity or the feature modules.
+
+Note `mkHost` passes no global `username` into the Home Manager modules — it sets
+`_module.args.username` per user, so a module can never see a different user's
+name. Only the standalone Ubuntu output, which has exactly one user, passes it as
+a specialArg.
 
 ### First switch on a fresh install
 
@@ -165,7 +189,9 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 | File                    | What it defines                                                       | Applies to      |
 | ----------------------- | --------------------------------------------------------------------- | --------------- |
 | `flake.nix`             | inputs (nixpkgs, Home Manager), the NixOS hosts and the Ubuntu outputs | —              |
-| `hosts/<hostname>/`     | per machine on NixOS: the installer's files (see `hosts/README.md`)   | that machine    |
+| `hosts/<hostname>/`     | per machine on NixOS: the installer's files plus `users.nix`           | that machine    |
+| `users/<name>.nix`      | a user's uid, gid and group membership, the same on every machine      | that user       |
+| `home/features/`        | one module per feature, selected by name in `hosts/*/users.nix`        | whoever selects |
 | `system/nixos.nix`      | the shared NixOS system layer (see “On NixOS”)                        | all users       |
 | `system/packages.nix`   | system-wide packages, plus the Firefox pref                           | all users       |
 | `home/default.nix`      | **the per-user package list** (`home.packages`) and the imports below | `christianhuth` |
