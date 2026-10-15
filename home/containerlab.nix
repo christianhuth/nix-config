@@ -1,9 +1,11 @@
-{ pkgs, ... }:
+{ pkgs, isNixOS, ... }:
 
 let
-  # Ubuntu's, deliberately. A graphical askpass is needed because the VSCodium
+  # seahorse's askpass. A graphical askpass is needed because the VSCodium
   # extension runs containerlab through child_process, so there is no terminal for
-  # a password prompt (see the findings below). seahorse is already installed here
+  # a password prompt (see the findings below).
+  #
+  # On Ubuntu, Ubuntu's copy, deliberately: seahorse is already installed there
   # and costs nothing extra; the Nix alternatives were measured and are not worth
   # their closure for a password dialog:
   #
@@ -11,8 +13,16 @@ let
   #   ssh-askpass-fullscreen      182M
   #   x11_ssh_askpass              43M   (binary lives in libexec, not bin)
   #
-  # If it is ever missing: sudo apt install seahorse
-  askpass = "/usr/libexec/seahorse/ssh-askpass";
+  # If it is ever missing there: sudo apt install seahorse
+  #
+  # On NixOS the same program from nixpkgs -- the path NixOS's own
+  # programs.seahorse module uses for ssh's askpass. GNOME enables that module
+  # by default, so this is the copy the system already carries.
+  askpass =
+    if isNixOS then
+      "${pkgs.seahorse}/libexec/seahorse/ssh-askpass"
+    else
+      "/usr/libexec/seahorse/ssh-askpass";
 
   clab = "${pkgs.containerlab}/bin/containerlab";
 
@@ -24,8 +34,12 @@ let
   # permissions to 444/555 root:root and strips setuid/setgid, because store paths
   # travel through binary caches where a setuid bit would be an escalation vector.
   # NixOS closes that gap with `security.wrappers`; off NixOS there is no
-  # equivalent, which is why this wrapper exists. After a migration to NixOS it
-  # becomes unnecessary.
+  # equivalent, which is why this wrapper exists.
+  #
+  # On NixOS it is kept anyway: a setuid containerlab via security.wrappers
+  # would hand root to everyone in its group, which is the same security
+  # decision as joining `docker` (see below) and is not made implicitly. sudo
+  # works the same way there, from /run/wrappers/bin.
   #
   # Note sudo itself has to be the system's: a Nix-built sudo could not be setuid
   # for exactly the same reason. writeShellApplication only *prefixes* PATH with
@@ -111,9 +125,10 @@ in
   # containerlab does NOT work with the rootless Docker from home/ddev.nix. It
   # wires its nodes together with veth pairs and network namespaces that it
   # creates in the host namespace, so it has to run as root and talk to a
-  # rootful daemon (/var/run/docker.sock). Nix cannot provide that daemon here
-  # -- same wall as in home/ddev.nix.
-
+  # rootful daemon (/var/run/docker.sock). On Ubuntu, Nix cannot provide that
+  # daemon -- same wall as in home/ddev.nix. On NixOS, system/nixos.nix runs
+  # it next to the rootless one.
+  #
   # The VSCodium extension (srl-labs.vscode-containerlab, see home/vscodium.nix)
   # cannot use that workaround, and will not work on this machine. Three findings
   # from its bundle, recorded so this is not re-investigated:

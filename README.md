@@ -1,6 +1,76 @@
 # nix-config
 
-Nix configuration for `christianhuth` on **Ubuntu 26.04** (not NixOS).
+Nix configuration for `christianhuth`, on **NixOS** and on **Ubuntu 26.04**.
+The same `home/` and the same package list serve both; NixOS just gets the
+system parts Ubuntu leaves to apt. See [On NixOS](#on-nixos) for that side —
+most of the rest of this README was written on Ubuntu and still describes it.
+
+## On NixOS
+
+One flake output per machine, `nixosConfigurations.<hostname>`, built from:
+
+| Piece                              | From                                                                 |
+| ---------------------------------- | -------------------------------------------------------------------- |
+| `hosts/<hostname>/*.nix`           | the installer's two files, copied verbatim — see `hosts/README.md`   |
+| `system/nixos.nix`                 | the shared system layer: what apt and the manual steps did on Ubuntu |
+| `system/packages.nix`              | layer 1, now as `environment.systemPackages`                         |
+| `home/default.nix`, `home/root.nix` | Home Manager as a NixOS module, both users in the same switch       |
+
+### First switch on a fresh install
+
+```bash
+nix-shell -p git                     # a fresh NixOS has no git yet
+git clone https://github.com/christianhuth/nix-config ~/code/christianhuth/nix-config
+cd ~/code/christianhuth/nix-config
+
+mkdir -p hosts/$(hostname)
+cp /etc/nixos/configuration.nix /etc/nixos/hardware-configuration.nix hosts/$(hostname)/
+sed -i '/programs.firefox.enable/d' hosts/$(hostname)/configuration.nix
+git add hosts/$(hostname)            # flakes only see files git tracks
+
+sudo nixos-rebuild switch --flake .
+```
+
+Then log out and back in, so the session picks up the rootless Docker unit and
+`DOCKER_HOST`. The one-time steps that stay manual are data, not
+configuration: `~/.wireguard/*.conf`, the GnuPG keyring and the `pass` store
+have to come over from the old machine, and `mkcert -install` runs once for
+ddev.
+
+### Day to day
+
+```bash
+sudo nixos-rebuild switch --flake .   # system + christianhuth + root
+nix flake update                      # re-pin inputs, then switch again
+```
+
+A broken switch is undone by picking the previous generation in the boot
+menu, or `sudo nixos-rebuild switch --rollback`.
+
+### What replaced the Ubuntu-only steps
+
+| On Ubuntu                                                | On NixOS (`system/nixos.nix` unless noted)                                  |
+| -------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `nix profile add .#system-packages`                      | `environment.systemPackages`, same list                                     |
+| separate `home-manager switch` for christianhuth and root | part of `nixos-rebuild switch` (`home-manager.nixosModules.home-manager`)  |
+| `targets.genericLinux.enable`                            | off — `isNixOS` in `home/default.nix`                                       |
+| `apt install pcscd yubikey-personalization`              | `services.pcscd.enable`, `services.udev.packages`                           |
+| rootless Docker from `docker.io` + setuptool             | `virtualisation.docker.rootless`                                            |
+| rootful Docker for containerlab                          | `virtualisation.docker.enable` (still no `docker` group membership)         |
+| flakes in `/etc/nix/nix.conf`                            | `nix.settings.experimental-features`                                        |
+| Ubuntu's `python3` for `layout_python3`                  | `pkgs.python3` in `environment.systemPackages`                              |
+| `/usr/bin/nmcli`, seahorse's askpass in `/usr/libexec`   | `/run/current-system/sw/bin/nmcli`, `pkgs.seahorse` — `isNixOS` in `home/`  |
+| AppArmor `userns` profiles for Electron                  | not needed: NixOS does not restrict unprivileged user namespaces            |
+
+`isNixOS` is an `extraSpecialArgs` flag set in `flake.nix`: `true` inside
+`nixosConfigurations`, `false` for the standalone `homeConfigurations`. It is
+used in exactly three places, where an Ubuntu path has no NixOS equivalent.
+
+One difference worth knowing: NixOS's rootless Docker module wires the CLI up
+through `DOCKER_HOST`, which `home/ddev.nix` deliberately avoids on Ubuntu in
+favour of the setuptool's `rootless` context. NixOS creates no such context,
+and `sudo` drops the variable, so `sudo containerlab` still reaches the rootful
+daemon.
 
 ## The two layers
 
@@ -25,7 +95,9 @@ Layer 1 is deliberately built so it **moves to NixOS 1:1** later: the list in
 
 | File                    | What it defines                                                       | Applies to      |
 | ----------------------- | --------------------------------------------------------------------- | --------------- |
-| `flake.nix`             | inputs (nixpkgs, Home Manager) and both outputs                       | —               |
+| `flake.nix`             | inputs (nixpkgs, Home Manager), the NixOS hosts and the Ubuntu outputs | —              |
+| `hosts/<hostname>/`     | per machine on NixOS: the installer's files (see `hosts/README.md`)   | that machine    |
+| `system/nixos.nix`      | the shared NixOS system layer (see “On NixOS”)                        | all users       |
 | `system/packages.nix`   | system-wide packages, plus the Firefox pref                           | all users       |
 | `home/default.nix`      | **the per-user package list** (`home.packages`) and the imports below | `christianhuth` |
 | `home/atuin.nix`        | atuin shell history, local only                                       | `christianhuth` |
@@ -1745,13 +1817,17 @@ parts go into modules that both configurations import.
 
 ## Path to NixOS
 
-Migrating later changes surprisingly little:
+Done — see [On NixOS](#on-nixos). The plan held up:
 
-1. `home/` stays **unchanged** and gets wired in as a NixOS module
-   (`home-manager.nixosModules.home-manager`) — or stays standalone.
-2. `system/packages.nix` becomes `environment.systemPackages`.
-3. New additions are `hosts/<hostname>/` with `configuration.nix` and
-   `hardware-configuration.nix`, plus `nixosConfigurations.<hostname>` in the
-   flake.
-4. Only then do user management, systemd services, bootloader, kernel modules
-   and so on come into play — that is the actual payoff of NixOS.
+1. `home/` got wired in as a NixOS module
+   (`home-manager.nixosModules.home-manager`). Unchanged apart from the
+   `isNixOS` flag in three places where Ubuntu paths were hardcoded.
+2. `system/packages.nix` became `environment.systemPackages`. It is a plain
+   list now; the `buildEnv` for Ubuntu moved into `flake.nix`.
+3. `hosts/<hostname>/` holds `configuration.nix` and
+   `hardware-configuration.nix`, and every directory there becomes a
+   `nixosConfigurations` entry.
+4. User management, systemd services, the boot loader and so on live in the
+   host's `configuration.nix` — still the installer's version, and the natural
+   place to start moving things into `system/nixos.nix` as they turn out to be
+   shared.

@@ -39,11 +39,14 @@
     };
 
     initExtra = ''
-      # Make less friendlier for non-text input files.
-      [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+      # Make less friendlier for non-text input files. Debian's lesspipe, so
+      # this only does something on Ubuntu.
+      command -v lesspipe >/dev/null && eval "$(SHELL=/bin/sh lesspipe)"
 
-      # Colour support for ls and grep.
-      if [ -x /usr/bin/dircolors ]; then
+      # Colour support for ls and grep. Looked up via PATH rather than
+      # /usr/bin, which NixOS does not have -- there dircolors comes from the
+      # system's coreutils.
+      if command -v dircolors >/dev/null; then
         test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
         alias ls='ls --color=auto'
         alias grep='grep --color=auto'
