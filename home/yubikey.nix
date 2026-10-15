@@ -32,6 +32,13 @@
   # Without pcscd the CCID applets are invisible to ykman; without the udev rule
   # `ykman otp` cannot open the device. FIDO/WebAuthn works without either.
   #
+  # On NixOS both are ordinary options and system/nixos.nix already sets them:
+  #
+  #   services.pcscd.enable = true;
+  #   services.udev.packages = [ pkgs.yubikey-personalization ];
+  #
+  # so nothing is left to do by hand there.
+  #
   # One interaction to be aware of given home/gnupg.nix: gpg-agent's scdaemon and
   # pcscd both want the card, and they can lock each other out ("card busy"). If
   # the OpenPGP applet is ever used from gpg, `programs.gpg.scdaemonSettings` is

@@ -36,8 +36,24 @@
 #
 # Note ~/.ssh/config is not managed here -- it is hand-maintained and holds host
 # entries, so it stays mutable.
-{ ... }:
+#
+# NixOS needs none of this, which is why the variable is only set off NixOS
+# rather than switched to a Nix path. NixOS derives it already:
+#
+#   programs.seahorse.enable          -- GNOME sets this (gnome.nix: "programs.
+#                                        seahorse.enable = notExcluded pkgs.seahorse")
+#     -> programs.ssh.askPassword     = "${pkgs.seahorse}/libexec/seahorse/ssh-askpass"
+#     -> environment.variables.SSH_ASKPASS  (programs/ssh.nix)
+#
+# Setting it here anyway would not be harmless: hm-session-vars.sh is sourced
+# from ~/.profile, i.e. AFTER environment.variables, so Home Manager always
+# wins. A hardcoded value would silently override whatever the system derived --
+# including the correct one, and any later change to programs.ssh.askPassword or
+# an `environment.gnome.excludePackages` that drops seahorse.
+{ lib, isNixOS, ... }:
 
 {
-  home.sessionVariables.SSH_ASKPASS = "/usr/libexec/seahorse/ssh-askpass";
+  home.sessionVariables = lib.mkIf (!isNixOS) {
+    SSH_ASKPASS = "/usr/libexec/seahorse/ssh-askpass";
+  };
 }
