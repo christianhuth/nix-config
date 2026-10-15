@@ -92,6 +92,76 @@ let
         ${autoconnectCase}
 
         if [ -n "$file" ]; then
+          # Is the imported profile still current? The .conf is only an import
+          # *source*: `nmcli connection import` never updates an existing profile,
+          # so without this check an edit to ~/.wireguard/<name>.conf would never
+          # arrive anywhere -- the tunnel would keep running from whatever was
+          # imported the first time. That is exactly how a changed address went
+          # missing once, with the switch cheerfully reporting "already known".
+          #
+          # Which file to compare against needs care. For a netplan-rendered
+          # profile the copy under /run gets a fresh mtime every time netplan
+          # renders -- at boot, or on `netplan apply` -- so comparing against it
+          # would hide any edit made before the last reboot. The netplan YAML in
+          # /etc is written when the profile changes and is not touched by a
+          # render, so that is the honest reference.
+          #
+          # Both are root-owned 0600, but their directories are world-traversable,
+          # so `stat` works. Nothing here reads a byte of either file: the tunnel
+          # configurations hold private keys, and this only ever looks at mtimes.
+          ref="$file"
+          case "$file" in
+            /run/*netplan-*)
+              uuid=$("$nmcli" -g connection.uuid connection show "$name" 2>/dev/null || true)
+              if [ -n "$uuid" ]; then
+                # nullglob is on, so an unmatched pattern leaves $# at 0.
+                set -- /etc/netplan/*"$uuid"*.yaml
+                if [ "$#" -gt 0 ]; then
+                  ref="$1"
+                fi
+              fi
+              ;;
+          esac
+
+          if [ "$conf" -nt "$ref" ]; then
+            echo "wireguard: '$name' is older than $conf, re-importing"
+
+            # Deleting the profile tears the tunnel down, so remember whether it
+            # was up and put it back afterwards. Leaving someone without their VPN
+            # because a switch ran would be worse than the stale configuration
+            # this fixes.
+            wasActive=no
+            if [ "$("$nmcli" -g GENERAL.STATE connection show "$name" 2>/dev/null || true)" = activated ]; then
+              wasActive=yes
+            fi
+
+            if ! "$nmcli" connection delete "$name" >/dev/null 2>&1; then
+              echo "wireguard: could not delete '$name', leaving it untouched" >&2
+              continue
+            fi
+
+            if "$nmcli" connection import type wireguard file "$conf" >/dev/null; then
+              "$nmcli" connection modify "$name" connection.autoconnect "$want" || true
+
+              # Import activates immediately (see the comment further down), so
+              # only the two cases that disagree with that need action.
+              if [ "$wasActive" = yes ]; then
+                echo "wireguard: re-imported '$name' (autoconnect=$want, still up)"
+              elif [ "$want" = no ]; then
+                "$nmcli" connection down "$name" >/dev/null 2>&1 || true
+                echo "wireguard: re-imported '$name' (autoconnect=no, brought down again)"
+              else
+                echo "wireguard: re-imported '$name' (autoconnect=yes, left running)"
+              fi
+            else
+              # The delete already happened, so there is no profile left to fall
+              # back to. Say so loudly rather than let it look like a no-op.
+              echo "wireguard: failed to re-import '$name' -- the profile is now GONE." >&2
+              echo "           Fix $conf and run wireguard-nm-import again." >&2
+            fi
+            continue
+          fi
+
           # Reconcile autoconnect for tunnels NetworkManager already knows, so
           # editing the list above is enough. The running state is deliberately
           # left alone here: autoconnect governs boot behaviour, and tearing down
