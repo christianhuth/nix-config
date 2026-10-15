@@ -10,7 +10,12 @@
 #      and VSCodium -- and home/krew.nix adds krew through its own
 #      `home.packages`. That is why none of those appear in the list below.
 #
-{ pkgs, username, ... }:
+{
+  pkgs,
+  username,
+  isNixOS,
+  ...
+}:
 
 {
   imports = [
@@ -40,10 +45,14 @@
   # Do NOT bump this casually -- read the Home Manager release notes first.
   home.stateVersion = "26.05";
 
-  # We are on Ubuntu, not NixOS. This sets XDG_DATA_DIRS to point at the Nix
-  # profiles so GNOME finds .desktop files and icons -- without it, Spotify
-  # and friends never show up in the application menu.
-  targets.genericLinux.enable = true;
+  # Ubuntu only. This sets XDG_DATA_DIRS to point at the Nix profiles so GNOME
+  # finds .desktop files and icons -- without it, Spotify and friends never
+  # show up in the application menu. NixOS wires its profiles in itself.
+  #
+  # `isNixOS` comes from extraSpecialArgs in flake.nix, set per output: true
+  # for the Home Manager instances inside nixosConfigurations, false for the
+  # standalone homeConfigurations used on Ubuntu.
+  targets.genericLinux.enable = !isNixOS;
 
   # Makes `home-manager` itself available as a command.
   programs.home-manager.enable = true;

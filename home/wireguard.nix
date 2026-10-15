@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  isNixOS,
   ...
 }:
 
@@ -30,11 +31,16 @@ let
           *) want=no ;;
         esac'';
 
-  # Deliberately Ubuntu's nmcli, not nixpkgs'. nmcli talks to the running
-  # NetworkManager over D-Bus, and the versions differ: Ubuntu runs 1.54.3 while
-  # nixpkgs 26.05 ships 1.56.0. Matching the daemon is the safer choice -- the
-  # same reasoning as for gpg and its agent.
-  nmcli = "/usr/bin/nmcli";
+  # Deliberately the nmcli that belongs to the running NetworkManager, not
+  # whatever nixpkgs' would be. nmcli talks to the daemon over D-Bus, and the
+  # versions can differ: Ubuntu runs 1.54.3 while nixpkgs 26.05 ships 1.56.0.
+  # Matching the daemon is the safer choice -- the same reasoning as for gpg
+  # and its agent.
+  #
+  # On NixOS the daemon comes from the system generation, so its nmcli is the
+  # one in /run/current-system -- by the time Home Manager's activation runs,
+  # that already points at the new generation.
+  nmcli = if isNixOS then "/run/current-system/sw/bin/nmcli" else "/usr/bin/nmcli";
 
   # The tunnel configurations hold WireGuard *private keys*, so they are
   # deliberately NOT moved into this repository: everything in /nix/store is

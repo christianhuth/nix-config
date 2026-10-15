@@ -1,5 +1,5 @@
 {
-  description = "Nix configuration for christianhuth (Ubuntu 26.04, not NixOS)";
+  description = "Nix configuration for christianhuth (NixOS, and Ubuntu 26.04 via standalone Home Manager)";
 
   inputs = {
     # Stable channel -- the baseline for everything here.
@@ -35,6 +35,7 @@
     let
       system = "x86_64-linux";
       username = "christianhuth";
+      inherit (nixpkgs) lib;
 
       # A second package set, only drawn from where a stable pin would hurt.
       unstable = import nixpkgs-unstable {
@@ -42,28 +43,102 @@
         config.allowUnfree = true;
       };
 
-      # One single pkgs instance, shared by both layers.
+      # Shared by both platforms: on Ubuntu they go into the pkgs instance
+      # below, on NixOS into `nixpkgs.overlays` (see mkHost).
+      overlays = [
+        # Our own packages and overrides.
+        (import ./pkgs/overlay.nix { inherit unstable; })
+
+        # Adds open-vsx{,-release}, vscode-marketplace{,-release} and friends
+        # to pkgs. Applied as an overlay rather than reading the flake's
+        # `extensions` output directly, because that output is built from the
+        # flake's own nixpkgs instance -- which has no allowUnfree, and the
+        # Claude Code extension is unfree. Going through our pkgs fixes that.
+        nix-vscode-extensions.overlays.default
+      ];
+
+      # One single pkgs instance, shared by both Ubuntu layers.
       # allowUnfree is required for Spotify and the Claude Code extension.
       pkgs = import nixpkgs {
-        inherit system;
+        inherit system overlays;
         config.allowUnfree = true;
+      };
 
-        overlays = [
-          # Our own packages and overrides.
-          (import ./pkgs/overlay.nix { inherit unstable; })
+      # Ubuntu's layer 1: the shared package list bundled into ONE derivation,
+      # because off NixOS there is no environment.systemPackages to put it in.
+      systemPackages = pkgs.buildEnv {
+        name = "system-packages";
+        paths = import ./system/packages.nix { inherit pkgs; };
 
-          # Adds open-vsx{,-release}, vscode-marketplace{,-release} and friends
-          # to pkgs. Applied as an overlay rather than reading the flake's
-          # `extensions` output directly, because that output is built from the
-          # flake's own nixpkgs instance -- which has no allowUnfree, and the
-          # Claude Code extension is unfree. Going through our pkgs fixes that.
-          nix-vscode-extensions.overlays.default
+        # Pull man pages and docs into the profile, not just the binaries.
+        extraOutputsToInstall = [
+          "man"
+          "doc"
         ];
       };
 
-      systemPackages = import ./system/packages.nix { inherit pkgs; };
+      # === NixOS =======================================================
+      # Every directory under hosts/ is one machine: the installer's
+      # configuration.nix and hardware-configuration.nix, copied in verbatim
+      # (see hosts/README.md). Naming the directory after the hostname means
+      # `sudo nixos-rebuild switch --flake .` picks it without a #name.
+      hosts = lib.attrNames (
+        lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./hosts)
+      );
+
+      mkHost =
+        hostname:
+        lib.nixosSystem {
+          modules = [
+            # Machine-specific, from the installer: boot loader, LUKS devices,
+            # file systems, locale, desktop, the user account.
+            (./hosts + "/${hostname}/configuration.nix")
+
+            # Shared system layer -- what apt and the manual steps in
+            # README.md did on Ubuntu.
+            ./system/nixos.nix
+
+            home-manager.nixosModules.home-manager
+            {
+              # Deliberately NOT `nixpkgs.pkgs = pkgs`: the installer writes
+              # `nixpkgs.config.allowUnfree = true` into configuration.nix, and
+              # NixOS refuses nixpkgs.config next to an externally created
+              # instance. Configuring NixOS's own instance merges cleanly.
+              nixpkgs.overlays = overlays;
+              nixpkgs.config.allowUnfree = true;
+
+              home-manager = {
+                # Home Manager uses the system's pkgs (with the overlays above)
+                # instead of evaluating a second nixpkgs.
+                useGlobalPkgs = true;
+                # Packages land in /etc/profiles/per-user/<name> instead of
+                # ~/.nix-profile.
+                useUserPackages = true;
+                # Same job as `-b backup` on Ubuntu, but for every switch.
+                backupFileExtension = "backup";
+
+                extraSpecialArgs = {
+                  inherit username;
+                  isNixOS = true;
+                };
+
+                # Both users in ONE `nixos-rebuild switch` -- the separate,
+                # easy-to-forget root switch from Ubuntu is gone.
+                users.${username} = ./home/default.nix;
+                users.root = ./home/root.nix;
+              };
+            }
+          ];
+        };
     in
     {
+      # === NixOS: system + both Home Manager users in one switch ==========
+      #   sudo nixos-rebuild switch --flake .
+      nixosConfigurations = lib.genAttrs hosts mkHost;
+
+      # Everything below is for Ubuntu, where Nix runs next to apt. On NixOS
+      # the same files are wired in through mkHost above instead.
+
       # === Layer 1: system-wide, for every user =========================
       # Package list: system/packages.nix
       #   sudo nix profile install .#system-packages
@@ -87,7 +162,10 @@
         # obvious where the per-user configuration actually starts.
         modules = [ ./home/default.nix ];
 
-        extraSpecialArgs = { inherit username; };
+        extraSpecialArgs = {
+          inherit username;
+          isNixOS = false;
+        };
       };
 
       # === root ==========================================================
@@ -102,6 +180,7 @@
       homeConfigurations.root = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
         modules = [ ./home/root.nix ];
+        extraSpecialArgs.isNixOS = false;
       };
     };
 }
