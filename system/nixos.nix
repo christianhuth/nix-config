@@ -4,7 +4,12 @@
 # Everything here was apt's job, or a manual step in README.md, on Ubuntu --
 # the "Nix cannot reach this" walls the home/ modules describe. On NixOS they
 # are ordinary options.
-{ config, pkgs, ... }:
+{
+  config,
+  pkgs,
+  username,
+  ...
+}:
 
 {
   # === Layer 1 ==========================================================
@@ -70,4 +75,63 @@
     enable = true;
     setSocketVariable = true;
   };
+
+  # === The user's identity and groups =====================================
+  # The installer's configuration.nix declares the account itself (password,
+  # description, its own extraGroups). Only what has to be the same on every
+  # machine lives here. It merges with that declaration rather than replacing it:
+  # extraGroups is a list option, so both halves add up.
+  #
+  # Note this has to be ONE attribute set. `users.users.${username}.uid` and
+  # `users.users.${username}.extraGroups` as two separate definitions are a parse
+  # error -- Nix cannot merge a *dynamic* attribute path that is written twice
+  # ("dynamic attribute 'christianhuth' already defined"), unlike a static one.
+  users.users.${username} = {
+    # Pinned, not left to the dynamic allocator. NixOS hands out uids from
+    # /var/lib/nixos/uid-map, which is stable per machine but NOT guaranteed
+    # identical across machines. Anything carrying numeric ownership -- a backup,
+    # an external disk, a home directory restored from the old laptop -- would
+    # then need chown -R. 1000 is what the Ubuntu machine already uses, so pinning
+    # it now changes nothing and settles it for every machine after.
+    uid = 1000;
+
+    # For the VSCodium containerlab extension, not for the CLI: `sudo containerlab`
+    # needs neither group. See the comment below.
+    extraGroups = [
+      "clab_admins"
+      "docker"
+    ];
+  };
+
+  users.groups.${username}.gid = 1000;
+
+  # === containerlab (home/containerlab.nix) ===============================
+  # The extension checks real group membership at activation time
+  # (execSync("id -nG")) and refuses to start otherwise:
+  #
+  #   inClabAdmins = groups.includes("clab_admins")
+  #   inDocker     = groups.includes("docker")
+  #   allowed = inClabAdmins && (runtime === "docker" ? inDocker
+  #                              : runtime === "podman" ? true : false)
+  #
+  #   -> "Extension activation failed. Insufficient permissions.
+  #       Ensure <user> is in the 'clab_admins' and 'docker' group(s)."
+  #
+  # containerlab itself also knows the group ("user '%v' is not part of
+  # containerlab admin group 'clab_admins'") and skips the check when it does not
+  # exist -- so it is created here explicitly rather than left implicit.
+  #
+  # Be aware what the `docker` half means: with virtualisation.docker.enable
+  # above, membership is root-equivalent, because a member can ask the rootful
+  # daemon to bind-mount / into a privileged container. This is the same
+  # trade-off README.md spells out for Ubuntu, and it is made deliberately so the
+  # extension works. Two ways out if that is ever unwanted:
+  #
+  #   * set `containerlab.runtime = "podman"` in home/vscodium.nix -- the gate
+  #     above then needs clab_admins only, no docker group at all;
+  #   * or drop the extension and drive the CLI through sudo, which needs neither.
+  #
+  # ddev is unaffected either way: it reaches the rootless daemon through
+  # DOCKER_HOST, which needs no group membership.
+  users.groups.clab_admins = { };
 }

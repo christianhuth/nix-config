@@ -32,10 +32,40 @@ sudo nixos-rebuild switch --flake .
 ```
 
 Then log out and back in, so the session picks up the rootless Docker unit and
-`DOCKER_HOST`. The one-time steps that stay manual are data, not
-configuration: `~/.wireguard/*.conf`, the GnuPG keyring and the `pass` store
-have to come over from the old machine, and `mkcert -install` runs once for
-ddev.
+`DOCKER_HOST`, and so the group membership from `system/nixos.nix` applies —
+group changes only reach new sessions.
+
+### What stays manual: secrets and data
+
+Configuration is declared; keys and accumulated state are not, and cannot be.
+Everything in `/nix/store` is world-readable, so a private key there would be
+readable by every user of the machine and would travel through binary caches —
+the same reasoning `home/wireguard.nix` already spells out for the tunnel
+configs. These come over from the old machine by hand:
+
+| Carry over | Why it is not declarative |
+| ------------------------- | ------------------------------------------------------------------- |
+| `~/.gnupg` | your private GPG keys |
+| `~/.password-store` | the passwords themselves, not a product of this config |
+| `~/.ssh` | the FIDO2 key handle, plus the hand-maintained `config` |
+| `~/.wireguard/*.conf` | WireGuard private keys — then run `wireguard-nm-import` once |
+| `~/.local/share/mkcert` | the local CA's **private key** |
+| `~/.local/share/atuin` | shell history |
+| `~/.kube` | cluster credentials, which kubeswitch reads |
+| `~/.ddev` | `global_config.yaml` and `project_list.yaml`, which ddev rewrites itself |
+
+Two of those have an order that matters. Copy `~/.local/share/mkcert` **before**
+running `mkcert -install`: with an empty CAROOT, mkcert generates a *new* CA, and
+every existing `*.ddev.site` certificate stops being trusted. And run
+`wireguard-nm-import` only after the configs are in place, or it has nothing to
+import.
+
+`sops-nix` or `agenix` would move this line — the *encrypted* form could then live
+in the repository and be decrypted at activation, outside the store. Even then one
+key has to arrive by hand to break the chicken-and-egg.
+
+Starting fresh instead — new GPG key, new `pass` store, sign in again everywhere —
+is a perfectly good option. It is just a decision, not the default.
 
 ### Day to day
 
@@ -47,6 +77,18 @@ nix flake update                      # re-pin inputs, then switch again
 A broken switch is undone by picking the previous generation in the boot
 menu, or `sudo nixos-rebuild switch --rollback`.
 
+### Trying a configuration before switching
+
+```bash
+nixos-rebuild build-vm --flake .#<hostname>
+./result/bin/run-<hostname>-vm
+```
+
+Boots this exact configuration in QEMU without touching the machine. The host's
+real disks are not involved: `qemu-vm.nix` replaces `fileSystems` with a scratch
+image (`mkVMOverride`) and clears `boot.initrd.luks.devices`, so the VM does not
+stop asking for a LUKS passphrase for a device it does not have.
+
 ### What replaced the Ubuntu-only steps
 
 | On Ubuntu                                                | On NixOS (`system/nixos.nix` unless noted)                                  |
@@ -56,15 +98,42 @@ menu, or `sudo nixos-rebuild switch --rollback`.
 | `targets.genericLinux.enable`                            | off — `isNixOS` in `home/default.nix`                                       |
 | `apt install pcscd yubikey-personalization`              | `services.pcscd.enable`, `services.udev.packages`                           |
 | rootless Docker from `docker.io` + setuptool             | `virtualisation.docker.rootless`                                            |
-| rootful Docker for containerlab                          | `virtualisation.docker.enable` (still no `docker` group membership)         |
+| rootful Docker for containerlab                          | `virtualisation.docker.enable`                                              |
+| `groupadd clab_admins` + `usermod -aG clab_admins,docker` | `users.groups.clab_admins`, `users.users.<name>.extraGroups`               |
+| uid handed out by Ubuntu's `adduser`                     | `users.users.<name>.uid = 1000`, and `users.groups.<name>.gid` with it      |
 | flakes in `/etc/nix/nix.conf`                            | `nix.settings.experimental-features`                                        |
 | Ubuntu's `python3` for `layout_python3`                  | `pkgs.python3` in `environment.systemPackages`                              |
-| `/usr/bin/nmcli`, seahorse's askpass in `/usr/libexec`   | `/run/current-system/sw/bin/nmcli`, `pkgs.seahorse` — `isNixOS` in `home/`  |
+| `/usr/bin/nmcli`                                        | `/run/current-system/sw/bin/nmcli` — `isNixOS` in `home/wireguard.nix`      |
+| seahorse's askpass for `sudo -A`                        | `${pkgs.seahorse}/libexec/…` — `isNixOS` in `home/containerlab.nix`         |
+| `SSH_ASKPASS` for the FIDO2 key                         | nothing: NixOS derives it, so `home/ssh.nix` sets it off NixOS only         |
 | AppArmor `userns` profiles for Electron                  | not needed: NixOS does not restrict unprivileged user namespaces            |
 
 `isNixOS` is an `extraSpecialArgs` flag set in `flake.nix`: `true` inside
 `nixosConfigurations`, `false` for the standalone `homeConfigurations`. It is
-used in exactly three places, where an Ubuntu path has no NixOS equivalent.
+used in exactly four places, each one an Ubuntu path with no NixOS equivalent:
+
+| Module | What it switches |
+| ----------------------- | ------------------------------------------------------------- |
+| `home/default.nix` | `targets.genericLinux.enable` |
+| `home/wireguard.nix` | which `nmcli` talks to the running NetworkManager |
+| `home/containerlab.nix` | where the graphical askpass for `sudo -A` comes from |
+| `home/ssh.nix` | whether `SSH_ASKPASS` is set at all |
+
+The last one is the odd one out, and deliberately so. NixOS derives the variable
+already — GNOME enables `programs.seahorse`, which sets
+`programs.ssh.askPassword`, which `programs/ssh.nix` exports as
+`environment.variables.SSH_ASKPASS`. Setting it from Home Manager anyway would not
+be redundant but harmful: `hm-session-vars.sh` is sourced from `~/.profile`, i.e.
+*after* `environment.variables`, so Home Manager always wins and would pin a value
+the system would otherwise keep correct.
+
+`system/nixos.nix` also joins `clab_admins` and `docker`. The second is
+root-equivalent once a rootful daemon listens — a member can ask it to bind-mount
+`/` into a privileged container — and it is there only because the VSCodium
+containerlab extension checks group membership at activation time. The file names
+the two ways out: `containerlab.runtime = "podman"`, whose gate needs
+`clab_admins` alone, or dropping the extension and driving the CLI through `sudo`,
+which needs neither.
 
 One difference worth knowing: NixOS's rootless Docker module wires the CLI up
 through `DOCKER_HOST`, which `home/ddev.nix` deliberately avoids on Ubuntu in

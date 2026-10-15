@@ -89,6 +89,11 @@
       mkHost =
         hostname:
         lib.nixosSystem {
+          # So system/nixos.nix can name the user without hardcoding it. Step 3 of
+          # the modularisation replaces this with a per-host user set; until then
+          # there is exactly one user and one place that defines its name.
+          specialArgs = { inherit username; };
+
           modules = [
             # Machine-specific, from the installer: boot loader, LUKS devices,
             # file systems, locale, desktop, the user account.

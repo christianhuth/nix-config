@@ -32,8 +32,13 @@
   # getDockerRootlessHostIP and a RootlessKit network-driver probe, and names the
   # context in its own error text ("Check: DOCKER_CONTEXT=rootless docker ps").
   #
-  # Setup is a one-off outside Nix; README.md ("Docker has to come from apt") has
-  # the full walkthrough with the reasoning. The short form:
+  # On NixOS none of the following applies -- system/nixos.nix runs both daemons
+  # through `virtualisation.docker.enable` and
+  # `virtualisation.docker.rootless.enable`, and the CLI finds the rootless one
+  # through DOCKER_HOST (setSocketVariable) rather than through a CLI context.
+  #
+  # On Ubuntu setup is a one-off outside Nix; README.md ("Docker has to come from
+  # apt") has the full walkthrough with the reasoning. The short form:
   #
   #   sudo apt install docker.io uidmap rootlesskit slirp4netns
   #   sudo gpasswd -d "$USER" docker          # root-equivalent, and unneeded
