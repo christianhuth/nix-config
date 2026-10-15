@@ -44,16 +44,46 @@ a specialArg.
 
 ```bash
 nix-shell -p git                     # a fresh NixOS has no git yet
-git clone https://github.com/christianhuth/nix-config ~/code/christianhuth/nix-config
+git clone -b nixos https://github.com/christianhuth/nix-config ~/code/christianhuth/nix-config
 cd ~/code/christianhuth/nix-config
 
-mkdir -p hosts/$(hostname)
-cp /etc/nixos/configuration.nix /etc/nixos/hardware-configuration.nix hosts/$(hostname)/
-sed -i '/programs.firefox.enable/d' hosts/$(hostname)/configuration.nix
-git add hosts/$(hostname)            # flakes only see files git tracks
+H=$(hostname)
+mkdir -p "hosts/$H"
+cp /etc/nixos/configuration.nix /etc/nixos/hardware-configuration.nix "hosts/$H/"
+sed -i '/programs.firefox.enable/d' "hosts/$H/configuration.nix"
+
+# Which users this machine has, and what each of them gets. The name must be a
+# user the installer declared in configuration.nix, and users/<name>.nix has to
+# exist for it -- see hosts/README.md.
+printf '{\n  christianhuth = [ ];\n}\n' > "hosts/$H/users.nix"
+
+git add "hosts/$H"                   # flakes only see files git tracks
+
+# Build first, switch second: this changes nothing on the machine and catches
+# every evaluation error, including a forgotten users.nix
+#   error: Path 'hosts/<host>/users.nix' does not exist in Git repository ...
+sudo nixos-rebuild build --flake .
 
 sudo nixos-rebuild switch --flake .
 ```
+
+Three things that go wrong here if skipped. `git add` is not optional — a flake
+reads the git tree, not the working directory, so an untracked `users.nix` is
+invisible and the evaluation fails as if it were missing. The user named in
+`users.nix` has to be one the installer actually created, because `users/<name>.nix`
+only adds uid, gid and groups on top; for a user NixOS does not already know, that
+file also needs `isNormalUser = true;` or the build stops with "Exactly one of
+isSystemUser and isNormalUser must be set". And `hardware-configuration.nix` has
+to come along, because it carries `nixpkgs.hostPlatform` and `mkHost` passes no
+`system`.
+
+Home Manager runs as a systemd service per user (`home-manager-<name>.service`,
+`after = nix-daemon.socket`), not as part of `switch-to-configuration`. So a
+broken home configuration does **not** stop the system from activating — the unit
+fails and `nixos-rebuild` reports it, and the system itself is already the new
+generation. It also means `/run/current-system` already points at the new
+generation when the activation runs, which `home/wireguard.nix` relies on to find
+the matching `nmcli`.
 
 Then log out and back in, so the session picks up the rootless Docker unit and
 `DOCKER_HOST`, and so the group membership from `system/nixos.nix` applies —
