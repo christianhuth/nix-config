@@ -38,7 +38,23 @@
     profiles.default.extensions = with pkgs.open-vsx-release; [
       anthropic.claude-code
       eamodio.gitlens
+
+      # Powers the containerlab topology editor (hence its drawioDefaultTheme
+      # setting). Listed in that extension's `extensionPack`, so VSCodium would
+      # normally pull it in on install -- it cannot here, because
+      # mutableExtensionsDir = false makes the extensions directory a read-only
+      # store path. Everything a declared extension needs has to be declared too.
+      hediet.vscode-drawio
+
       ms-kubernetes-tools.vscode-kubernetes-tools
+
+      # Not optional: ms-kubernetes-tools declares this in
+      # `extensionDependencies`, which VSCodium enforces at activation time --
+      # without it the Kubernetes extension refuses to start with
+      #   Cannot activate the 'Kubernetes' extension because it depends on the
+      #   'YAML' extension from 'Red Hat', which is not installed.
+      # srl-labs.vscode-containerlab also lists it, in its extensionPack.
+      redhat.vscode-yaml
 
       # 0.26.3. Needs `vscode ^1.105.1` per its engines field -- satisfied by
       # 26.05's VSCodium 1.116. It is only a front end for the containerlab CLI,

@@ -42,8 +42,9 @@ let
       # These read nothing privileged. Keeping them unelevated matters: the
       # extension runs `containerlab version check` on every activation, and
       # elevating that would pop a password dialog each time VSCodium starts.
+      # `__complete` is what the shell completion calls on every Tab press.
       case "''${1-}" in
-        version | completion | generate | help | --help | -h | "")
+        version | completion | __complete | __completeNoDesc | generate | help | --help | -h | "")
           exec ${clab} "$@"
           ;;
       esac
@@ -81,27 +82,37 @@ let
       exec sudo -A -- ${clab} "$@"
     '';
   };
+
+  # What goes on PATH: the wrapper under containerlab's own names, plus the
+  # package's shell completions. So `containerlab deploy` (and `clab`) just
+  # works without sudo in front, like upstream's sudo-less SUID install -- and
+  # `sudo containerlab` would not find it anyway, since sudo's secure_path does
+  # not contain the Nix profile. The unwrapped binary is the store path in
+  # `clab` above.
+  containerlab-cli = pkgs.symlinkJoin {
+    name = "containerlab-cli-${pkgs.containerlab.version}";
+    # From nixos-unstable via pkgs/overlay.nix, not from 26.05 -- see the
+    # comment there. Used by ~/code/christianhuth/homelab/network/lab.
+    paths = [
+      containerlab-root
+      pkgs.containerlab
+    ];
+    postBuild = ''
+      rm "$out/bin/containerlab"
+      ln -s ${containerlab-root}/bin/containerlab-root "$out/bin/containerlab"
+      ln -s ${containerlab-root}/bin/containerlab-root "$out/bin/clab"
+    '';
+  };
 in
 
 {
-  home.packages = [
-    containerlab-root
-    # From nixos-unstable via pkgs/overlay.nix, not from 26.05 -- see the comment
-    # there. Used by ~/code/christianhuth/homelab/network/lab.
-    pkgs.containerlab
-  ];
+  home.packages = [ containerlab-cli ];
 
   # containerlab does NOT work with the rootless Docker from home/ddev.nix. It
   # wires its nodes together with veth pairs and network namespaces that it
   # creates in the host namespace, so it has to run as root and talk to a
   # rootful daemon (/var/run/docker.sock). Nix cannot provide that daemon here
   # -- same wall as in home/ddev.nix.
-  #
-  # sudo's secure_path does not contain ~/.nix-profile, so call it as
-  #
-  #   sudo "$(command -v containerlab)" ...
-  #
-  # which is what the homelab's lab.sh does.
 
   # The VSCodium extension (srl-labs.vscode-containerlab, see home/vscodium.nix)
   # cannot use that workaround, and will not work on this machine. Three findings
@@ -144,8 +155,8 @@ in
   # here makes it implicitly. The CLI path above keeps working either way.
 
   # The extension resolves the binary from this setting before falling back to
-  # `which containerlab`, so it gets the elevating wrapper while a plain
-  # `containerlab` on PATH stays the unwrapped Nix build.
+  # `which containerlab`. Both are the elevating wrapper by now; the setting
+  # just pins it to the store path.
   programs.vscodium.profiles.default.userSettings."containerlab.binaryPath" =
     "${containerlab-root}/bin/containerlab-root";
 }
