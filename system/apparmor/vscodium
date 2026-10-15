@@ -1,0 +1,31 @@
+# AppArmor profile for VSCodium installed from the Nix store.
+#
+# Same cause as system/apparmor/termius: Ubuntu sets
+#   kernel.apparmor_restrict_unprivileged_userns = 1
+# so unconfined binaries cannot create user namespaces, which Chromium needs
+# for its sandbox. The SUID fallback is unavailable too -- chrome-sandbox
+# would have to be setuid root, and nothing in the store can be setuid.
+# Without this profile VSCodium aborts at startup.
+#
+# VSCodium bundles its own Electron as lib/vscode/codium instead of using
+# nixpkgs' electron, so system/apparmor/nix-electron does not cover it.
+#
+# Grant `userns` and leave the program otherwise unconfined, like Ubuntu's
+# own profile for VS Code. The sandbox itself stays active.
+#
+# The glob matches any store path and any version, so this survives
+# rebuilds and upgrades.
+#
+# Install (needs root; see README.md):
+#   sudo install -Dm644 system/apparmor/vscodium /etc/apparmor.d/vscodium
+#   sudo apparmor_parser -r /etc/apparmor.d/vscodium
+
+abi <abi/5.0>,
+
+include <tunables/global>
+
+profile vscodium /nix/store/*-vscodium-*/lib/vscode/codium flags=(unconfined) {
+  userns,
+
+  include if exists <local/vscodium>
+}

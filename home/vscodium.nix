@@ -39,6 +39,12 @@
       anthropic.claude-code
       eamodio.gitlens
       ms-kubernetes-tools.vscode-kubernetes-tools
+
+      # 0.26.3. Needs `vscode ^1.105.1` per its engines field -- satisfied by
+      # 26.05's VSCodium 1.116. It is only a front end for the containerlab CLI,
+      # which this repository deliberately does NOT install; see
+      # home/containerlab.nix for the SUID and group reasons.
+      srl-labs.vscode-containerlab
     ];
 
     # Nix owns ~/.config/VSCodium/User/settings.json from here on, which means
@@ -66,6 +72,12 @@
         # because settings.json is a read-only store symlink here. Moving Claude
         # through the UI will not stick; this value is the source of truth.
         "claudeCode.preferredLocation" = "sidebar";
+
+        # The extension checks github for a newer containerlab release and offers
+        # to run `curl -sL https://containerlab.dev/setup | sudo bash -s all`.
+        # Harmless to decline, but the prompt is noise on a machine where the CLI
+        # is managed outside VSCodium either way.
+        "containerlab.skipUpdateCheck" = true;
 
         # Pre-existing, kept as they were.
         "claudeCode.focusView" = false;
