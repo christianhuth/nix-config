@@ -1,4 +1,10 @@
-{ pkgs, ... }:
+{
+  pkgs,
+  isNixOS,
+  # Only passed when Home Manager runs as a NixOS module.
+  osConfig ? null,
+  ...
+}:
 
 let
   ini = pkgs.formats.ini { };
@@ -82,7 +88,12 @@ in
     # GNOME/Wayland session; if a prompt ever fails to appear, adding pkgs.gcr
     # to home.packages is the documented fix and pkgs.pinentry-curses the
     # fallback.
-    pinentry.package = pkgs.pinentry-gnome3;
+    # Same reasoning as the askpass in home/containerlab.nix: on NixOS follow what
+    # the desktop already chose, since plasma6.nix:263 sets pinentry-qt while a
+    # GNOME system leaves the nixpkgs default. On Ubuntu there is no system to
+    # ask, and that machine runs GNOME.
+    pinentry.package =
+      if isNixOS then osConfig.programs.gnupg.agent.pinentryPackage else pkgs.pinentry-gnome3;
 
     # Deliberately not enabled: enableSshSupport would make gpg-agent replace
     # ssh-agent and take over SSH key handling. That is a separate decision from

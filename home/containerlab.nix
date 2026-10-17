@@ -1,4 +1,10 @@
-{ pkgs, isNixOS, ... }:
+{
+  pkgs,
+  isNixOS,
+  # Only passed when Home Manager runs as a NixOS module, hence the default.
+  osConfig ? null,
+  ...
+}:
 
 let
   # seahorse's askpass. A graphical askpass is needed because the VSCodium
@@ -15,12 +21,20 @@ let
   #
   # If it is ever missing there: sudo apt install seahorse
   #
-  # On NixOS the same program from nixpkgs -- the path NixOS's own
-  # programs.seahorse module uses for ssh's askpass. GNOME enables that module
-  # by default, so this is the copy the system already carries.
+  # On NixOS: whatever the system already decided, rather than a package named
+  # here. Measured reason -- the desktops disagree, and hardcoding picks a fight
+  # with whichever machine is not the one you were thinking of:
+  #
+  #   programs/seahorse.nix:28                  GNOME  -> seahorse's ssh-askpass
+  #   services/desktop-managers/plasma6.nix:265 Plasma -> ksshaskpass
+  #
+  # Both set `programs.ssh.askPassword` with mkDefault, so reading it back gets
+  # the one that fits. The NixOS laptop runs Plasma; pinning seahorse here would
+  # have put a GNOME askpass over its ksshaskpass and dragged a 388M closure onto
+  # a machine that has no other use for it.
   askpass =
     if isNixOS then
-      "${pkgs.seahorse}/libexec/seahorse/ssh-askpass"
+      osConfig.programs.ssh.askPassword
     else
       "/usr/libexec/seahorse/ssh-askpass";
 
