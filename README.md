@@ -712,11 +712,49 @@ nix build .#termius && ./result/bin/termius-app
 
 `termius` is exposed as a flake output for that purpose.
 
-A note on why this is tolerated rather than fixed: the alternatives are worse.
-`pkgs.termius` repackages the Snap Store artifact and sits several releases
-behind, and this machine moved *off* snap deliberately (see “The root prompt” and
-the VSCodium section). Mirroring a 155 MB vendor .deb somewhere stable would make
-it reproducible but is not ours to redistribute.
+### Why not nixpkgs' termius, which *is* reproducible
+
+Worth re-reading before changing this, because the obvious objection is right:
+`pkgs.termius` fetches a **revision-pinned** snap
+(`…/WkTBXwoX81rBe3s3OTt3EiiLKBx2QhuS_<rev>.snap`), snap revisions are immutable,
+and revision 253 still resolves today. That route is reproducible, which ours is
+not. One old argument against it does *not* apply: nixpkgs runs `unsquashfs` on
+the artifact and patches it, so snapd and its confinement are not involved — that
+was the problem with Termius *as a snap*, a different thing.
+
+Two measurements decided against it anyway, on 2026-10-17:
+
+| | Version | Age |
+| ------------------ | ------- | ------------------------------------------ |
+| this derivation | 10.2.1 | released 2026-10-12 |
+| nixpkgs unstable | 9.43.1 | in nixpkgs since 2026-08-17 |
+| nixpkgs 26.05 | 9.36.2 | in nixpkgs since 2026-01-20 |
+
+The 26.05 pin is not one release behind but nine months: nixpkgs itself left
+9.36.2 on 2026-06-07, after the release branch had split. Bump history shows a
+cadence of two to five months despite the package having an `updateScript`.
+
+And overriding the version does not close the gap, because the derivation does
+not build against the current snap at all:
+
+```
+Builder called die: Cannot wrap '.../opt/termius/termius-app'
+  because it is not an executable file
+```
+
+The snap moved `opt/termius/termius-app` to `app/termius-app`; the derivation
+hardcodes the old path in its install phase and wrapper. So switching today means
+accepting 9.36.2, or carrying a patched derivation — which is the custom
+maintenance the switch was supposed to remove.
+
+Deliberate follow-up, not forgotten: fixing that path upstream would repair the
+build *and* let nixpkgs reach 10.2.1, at which point this derivation can be
+deleted in favour of `pkgs.termius` and the reproducibility problem goes away
+with it. Keeping the .deb is a decision for the migration — getting everything
+under Nix first — not a judgement that the .deb is the better source.
+
+Mirroring the 155 MB vendor .deb somewhere stable would also make it
+reproducible, but it is not ours to redistribute.
 
 ## pass and GnuPG
 
