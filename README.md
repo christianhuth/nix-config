@@ -669,28 +669,54 @@ trade.
 
 ### Updating it
 
-This is the price of leaving nixpkgs: **no automatic updates.** Termius ships an
-electron-updater manifest that hands over both values needed:
+This is the price of leaving nixpkgs: **no automatic updates.** It used to be
+pleasant — an electron-updater manifest handed over both the version and a
+base64 sha512 that is already Nix's SRI format. That stopped working.
 
-```bash
-curl -s https://autoupdate.termius.com/linux/latest-linux.yml
+Measured 2026-10-17, after a build on a machine without the artifact cached
+failed with `cannot download termius-app_10.1.0_amd64.deb from any mirror`:
+
+| URL | |
+| ------------------------------------------------------------ | --- |
+| `autoupdate.termius.com/linux/termius-app_10.1.0_amd64.deb` | 404 |
+| `autoupdate.termius.com/linux/termius-app_10.1.3_amd64.deb` | 404 |
+| `autoupdate.termius.com/linux/termius-app_10.2.1_amd64.deb` | 404 |
+| `download.termius.com/linux/termius-app_10.2.1_amd64.deb` | 404 |
+| `download.termius.com/linux/Termius.deb` | 200 |
+
+Both manifests still advertise 10.1.3 while the file actually served is 10.2.1,
+so the manifest is no longer a usable source for the version *or* the hash.
+`pkgs/termius/package.nix` therefore points at the unversioned URL, and `version`
+is only a label read out of the .deb's control file.
+
+The consequence is worth stating plainly: because the URL is a moving target, the
+pinned hash stops matching on every Termius release, and an old checkout of this
+repository cannot be rebuilt from scratch once a new release is out. What a
+release looks like now:
+
+```
+hash mismatch in fixed-output derivation '/nix/store/…-Termius.deb.drv':
+  specified: sha512-OFI4…
+  got:       sha512-<new>
 ```
 
-```yaml
-version: 10.1.0
-path: termius-app_10.1.0_amd64.deb
-sha512: mABJip003+zApFtqczR0f+IcF85vLMqWzqnQeoiZEXVGtjkM1MsH+kvLYXEn09XiBAseFiyQyUW8AI/b607wQQ==
-```
-
-That `sha512` is base64-encoded, which is exactly Nix's SRI format — prefix it
-with `sha512-` and it goes straight into the derivation. So an update means:
-copy `version` and the prefixed hash into `pkgs/termius/package.nix`, then
+Copy the `got:` value into the derivation — the error hands you the answer, which
+is an improvement on the 404 it replaces. To fetch it deliberately instead of
+waiting for a failure:
 
 ```bash
+nix store prefetch-file --hash-type sha512 https://download.termius.com/linux/Termius.deb
+dpkg-deb --info "$(nix eval --raw .#termius.src)"   # the version for the label
 nix build .#termius && ./result/bin/termius-app
 ```
 
 `termius` is exposed as a flake output for that purpose.
+
+A note on why this is tolerated rather than fixed: the alternatives are worse.
+`pkgs.termius` repackages the Snap Store artifact and sits several releases
+behind, and this machine moved *off* snap deliberately (see “The root prompt” and
+the VSCodium section). Mirroring a 155 MB vendor .deb somewhere stable would make
+it reproducible but is not ours to redistribute.
 
 ## pass and GnuPG
 

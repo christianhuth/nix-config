@@ -4,12 +4,34 @@
 # (it downloads a .snap from api.snapcraft.io and unsquashfs's it), and the
 # revision pinned in nixpkgs 26.05 is 9.36.2 -- several releases behind.
 #
-# Termius publishes an electron-updater manifest at
-#   https://autoupdate.termius.com/linux/latest-linux.yml
-# which gives the current version, the versioned .deb filename and a base64
-# sha512. That base64 digest is already in Nix's SRI format, so `hash` below
-# can be copied straight out of the manifest -- see README.md for the update
-# procedure.
+# Termius no longer offers a versioned download, which is why `src` below points
+# at an unversioned URL. Measured 2026-10-17, after a NixOS build failed with
+# "cannot download termius-app_10.1.0_amd64.deb from any mirror":
+#
+#   autoupdate.termius.com/linux/termius-app_10.1.0_amd64.deb   404
+#   autoupdate.termius.com/linux/termius-app_10.1.3_amd64.deb   404
+#   autoupdate.termius.com/linux/termius-app_10.2.1_amd64.deb   404
+#   download.termius.com/linux/termius-app_10.2.1_amd64.deb     404
+#   download.termius.com/linux/Termius.deb                      200
+#
+# The electron-updater manifests at autoupdate.termius.com/linux/latest-linux.yml
+# and download.termius.com/linux/latest-linux.yml both still advertise 10.1.3,
+# while the file actually served is 10.2.1 -- so the manifest is no longer a
+# usable source for either the version or the hash, and the old update procedure
+# in README.md does not work any more.
+#
+# What this costs: the URL is a moving target, so the pinned hash stops matching
+# on every Termius release and the build then fails with
+#
+#   hash mismatch in fixed-output derivation ...
+#     specified: sha512-OFI4...
+#     got:       sha512-<new>
+#
+# Copy the `got:` value in here. That is strictly better than the 404 this
+# replaces -- the error hands you the answer -- but it does mean an old checkout
+# of this repository cannot be rebuilt from scratch once a new release is out.
+# The `version` below is therefore a label read out of the .deb's control file
+# (`dpkg-deb --info`), not something that selects what gets downloaded.
 {
   lib,
   stdenv,
@@ -49,11 +71,13 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "termius";
-  version = "10.1.0";
+  version = "10.2.1";
 
   src = fetchurl {
-    url = "https://autoupdate.termius.com/linux/termius-app_${finalAttrs.version}_amd64.deb";
-    hash = "sha512-mABJip003+zApFtqczR0f+IcF85vLMqWzqnQeoiZEXVGtjkM1MsH+kvLYXEn09XiBAseFiyQyUW8AI/b607wQQ==";
+    # Unversioned on purpose -- see the top of this file. Deliberately NOT
+    # interpolating `version`: that would suggest the URL selects a version.
+    url = "https://download.termius.com/linux/Termius.deb";
+    hash = "sha512-OFI4vhmbL55FHC23G59RPXiRCvZvDysdkEcgZx8YkUUjDGNefk8JvUsYW90VQb1pCGszvzOpoK9UrNW2hIpDyw==";
   };
 
   nativeBuildInputs = [
