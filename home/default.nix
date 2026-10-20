@@ -82,6 +82,29 @@
     kargo
     kubevirt # provides `virtctl`
 
+    # Moved out of home/krew.nix. Only these three keep working *exactly* as
+    # before, because their binary name is what kubectl looks for: krew installs
+    # kubectl-explore, kubectl-tree and kubectl-view_secret, and nixpkgs ships
+    # the same names. `kubectl view-secret` still resolves, since kubectl
+    # retries a dashed subcommand with underscores.
+    #
+    # The win is that these are now part of the generation instead of being
+    # downloaded by krew on every activation.
+    kubectl-explore
+    kubectl-tree
+    kubectl-view-secret # binary: kubectl-view_secret
+
+    # Cluster inspection and reporting. All verified to be the tool meant here
+    # rather than a name collision -- `nova` in particular is Fairwinds', not
+    # OpenStack's.
+    kubespy # pulumi/kubespy, observe resources in real time
+    kubetail # johanhaleby/kubetail -- NOT krew's `tail`, which is kail
+    nova # Fairwinds, finds outdated Helm releases
+    pluto # Fairwinds, finds deprecated apiVersions
+
+    # OpenShift client. The attribute is `openshift`; the binary is `oc`.
+    openshift
+
     # --- Development ----------------------------------------------------
     gh
     php84Packages.composer # there is no top-level `composer` attribute
@@ -90,6 +113,12 @@
     # `layout_python3` in home/code.nix's .envrc: direnv's layout builds a plain
     # virtualenv from whatever python3 is in PATH, and uv operates inside it.
     uv
+
+    # mikefarah's yq, which is the one nearly everything means by `yq`.
+    # Deliberately NOT `pkgs.yq`: that is the Python wrapper around jq and
+    # provides `yq`, `tomlq` and `xq`. Both would install a binary called `yq`,
+    # so they cannot be combined.
+    yq-go
 
     # Provides `ansible-galaxy` along with `ansible`, `ansible-playbook`,
     # `ansible-vault` and the rest.

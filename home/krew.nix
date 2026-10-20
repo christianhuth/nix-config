@@ -11,11 +11,21 @@ let
   # Heads up: this list is the one deliberately NON-declarative part of this
   # configuration. krew fetches its plugins from its own index at runtime, so
   # the result depends on when you run it. See README.md, section "krew".
+  # Plugins that exist in nixpkgs under the *same binary name* were moved to
+  # home/default.nix -- explore, tree and view-secret. krew installs those as
+  # kubectl-explore, kubectl-tree and kubectl-view_secret, and nixpkgs ships
+  # exactly those names, so nothing changes about how they are invoked; they are
+  # simply part of the generation now instead of a download on every activation.
+  #
+  # Everything left here has either no nixpkgs package (get-all, rbac-lookup,
+  # rbac-view, rolesum, topology, who-can, whoami) or one whose binary is named
+  # differently -- rakkess, kubepug, df-pv, kubelogin, kube-capacity, stern,
+  # kail. Moving those would trade `kubectl stern` for `stern`, which is a change
+  # to how the command is typed, not a packaging detail.
   plugins = [
     "access-matrix"
     "deprecations"
     "df-pv"
-    "explore"
     "get-all"
     "oidc-login"
     "rbac-lookup"
@@ -25,8 +35,6 @@ let
     "stern"
     "tail"
     "topology"
-    "tree"
-    "view-secret"
     "virt"
     "who-can"
     "whoami"
