@@ -11,6 +11,10 @@ let
   # Heads up: this list is the one deliberately NON-declarative part of this
   # configuration. krew fetches its plugins from its own index at runtime, so
   # the result depends on when you run it. See README.md, section "krew".
+  # Removing a name from this list does NOT uninstall the plugin: the activation
+  # only ever installs, deliberately, so a switch cannot tear tooling out from
+  # under a running shell. Clean up by hand with `krew uninstall <name>`.
+  #
   # Plugins that exist in nixpkgs under the *same binary name* were moved to
   # home/default.nix -- explore, tree and view-secret. krew installs those as
   # kubectl-explore, kubectl-tree and kubectl-view_secret, and nixpkgs ships
@@ -41,7 +45,19 @@ let
   ];
 in
 {
-  home.packages = [ pkgs.krew ]; # krew itself; the plugins are handled below
+  # krew itself; the plugins are handled below.
+  #
+  # Note it is invoked as `krew`, NOT `kubectl krew`. Upstream's installer puts
+  # krew in ~/.krew/bin as kubectl-krew, which makes it a kubectl plugin;
+  # pkgs.krew just provides a binary called `krew`, so
+  #
+  #   kubectl krew uninstall tree
+  #   error: unknown command "krew" for "kubectl"
+  #
+  # The working form is `krew uninstall tree`. KREW_ROOT does not need setting by
+  # hand -- it defaults to ~/.krew, which is what krewRoot above resolves to --
+  # but the activation sets it explicitly so the two can never drift.
+  home.packages = [ pkgs.krew ];
 
   # kubectl discovers its plugins purely through PATH.
   home.sessionPath = [ "${krewRoot}/bin" ];
