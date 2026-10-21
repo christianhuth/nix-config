@@ -17,6 +17,26 @@
     # Installing it is only half the job -- the terminal has to be told to use
     # it. That part is declared below rather than clicked.
     pkgs.nerd-fonts.fira-code
+
+    # Document fonts, for the LibreOffice in home/default.nix. These are the
+    # free, *metrically compatible* substitutes -- same advance widths as the
+    # Microsoft originals, so a document keeps its line and page breaks even
+    # though the glyphs differ slightly:
+    #
+    #   carlito         <-> Calibri   (Word's default since 2007)
+    #   caladea         <-> Cambria
+    #   liberation_ttf  <-> Arial, Times New Roman, Courier New
+    #
+    # Needed because pkgs.libreoffice ships no fonts at all, which is easy to
+    # assume otherwise: it contains zero .ttf files.
+    #
+    # The genuine Microsoft faces would be pkgs.corefonts (Arial, Times, Courier
+    # and friends; unfree, accepts an EULA). There is no `vistafonts` attribute
+    # in 26.05, so Calibri and Cambria themselves are not available this way at
+    # all -- the metric substitutes above are the answer, not a fallback.
+    pkgs.carlito
+    pkgs.caladea
+    pkgs.liberation_ttf
   ];
 
   # Ptyxis (GNOME's terminal since 49) keeps its font in dconf, so this does not

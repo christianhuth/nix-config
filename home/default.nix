@@ -85,12 +85,10 @@
     # instead of GTK ones -- but picking per machine needs a per-host feature
     # rather than this shared list, so it is deliberately not done here yet.
     #
-    # On fonts: faithful layout of Office documents depends on metrics, not just
-    # on the glyphs. LibreOffice ships Carlito and Caladea, which are
-    # metric-compatible with Calibri and Cambria, and Liberation for the
-    # Arial/Times/Courier trio, so line and page breaks normally survive. If a
-    # document still reflows, the actual Microsoft fonts are `corefonts` and
-    # `vistafonts` -- both unfree, and not added unasked.
+    # The matching fonts are NOT in this package -- measured, it contains zero
+    # .ttf files -- so they are installed separately in home/fonts.nix. Without
+    # them a .docx in Calibri reflows, because substitution picks a face with
+    # different metrics and line and page breaks move.
     libreoffice
 
     # --- Network / VPN --------------------------------------------------
