@@ -8,7 +8,7 @@
 # Taking over ~/.config/mimeapps.list means Home Manager owns the whole file, so
 # the Thunderbird scheme handler that was already in it is carried over below --
 # dropping it would silently break mailto-style links from Thunderbird itself.
-{ config, ... }:
+{ ... }:
 
 {
   xdg.mimeApps.enable = true;
@@ -62,8 +62,15 @@
       "x-scheme-handler/net.thunderbird" = [ "thunderbird_thunderbird.desktop" ];
     };
 
-  # The file already existed as a plain file, so Home Manager would refuse with
-  # "would be clobbered". Forcing it hands ownership over; nothing is lost,
-  # because its only entry is reproduced above.
-  home.file."${config.xdg.configHome}/mimeapps.list".force = true;
+  # The file already existed as a plain file, so activation refuses with
+  # "Existing file ... would be clobbered". Forcing it hands ownership over, and
+  # nothing is lost because its only entry is reproduced above.
+  #
+  # Note the form: `xdg.configFile."mimeapps.list"`, which is what the mimeApps
+  # module itself uses. Writing the same thing as
+  # `home.file."${config.xdg.configHome}/mimeapps.list".force` addresses the very
+  # same attribute and fails with "has conflicting definition values" -- the
+  # mirror image of the trap in home/vscodium.nix, where the relative form was
+  # the wrong one.
+  xdg.configFile."mimeapps.list".force = true;
 }
