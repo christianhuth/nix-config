@@ -60,6 +60,30 @@
     # called `termius-app`, not `termius`.
     termius
 
+    # Office suite, for reading and editing .docx/.xlsx/.pptx.
+    #
+    # Not OpenOffice: Apache OpenOffice has been effectively dormant for years
+    # and is not in nixpkgs at all (`openoffice` and `apache-openoffice` are both
+    # missing attributes). LibreOffice is the fork that kept moving.
+    #
+    # This attribute is the conservative branch -- nixpkgs maps `libreoffice` to
+    # libreoffice-still, currently 25.8.5.2. `libreoffice-fresh` is 26.2.1.2 and
+    # carries newer import filters, which can matter for documents from recent
+    # Office versions; swap the name if a file ever renders wrongly.
+    #
+    # There is also a Qt build (`libreoffice-qt6`, `libreoffice-qt6-fresh`). It
+    # is the better fit on the Plasma machine -- native file dialogs and theming
+    # instead of GTK ones -- but picking per machine needs a per-host feature
+    # rather than this shared list, so it is deliberately not done here yet.
+    #
+    # On fonts: faithful layout of Office documents depends on metrics, not just
+    # on the glyphs. LibreOffice ships Carlito and Caladea, which are
+    # metric-compatible with Calibri and Cambria, and Liberation for the
+    # Arial/Times/Courier trio, so line and page breaks normally survive. If a
+    # document still reflows, the actual Microsoft fonts are `corefonts` and
+    # `vistafonts` -- both unfree, and not added unasked.
+    libreoffice
+
     # --- Network / VPN --------------------------------------------------
     netbird
 
