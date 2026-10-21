@@ -24,6 +24,7 @@
     ./fonts.nix # fontconfig + the Nerd Font starship needs
     ./git.nix # git + its configuration
     ./gnupg.nix # pass, gnupg, and GPG_TTY
+    ./mimeapps.nix # which application opens .docx/.xlsx/.pptx
     ./kubeswitch.nix # kubeswitch (needs bash.nix for its shell function)
     ./ssh.nix # SSH_ASKPASS, so the FIDO2 key works without a TTY
     ./starship.nix # prompt (owns PS1; see bash.nix)
