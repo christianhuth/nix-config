@@ -70,6 +70,16 @@
     # called `termius-app`, not `termius`.
     termius
 
+    # Outlook, from the same unofficial Electron wrapper that was installed as a
+    # snap on the Ubuntu machine -- Microsoft ships no Linux client and nixpkgs
+    # has no package. See pkgs/outlook-ew/package.nix, which also records what
+    # moving it off snap costs in isolation.
+    #
+    # Next to Thunderbird (system/packages.nix) rather than replacing it: the
+    # mail accounts live in different places, and home/mimeapps.nix keeps
+    # Thunderbird as the handler for mail links.
+    outlook-ew
+
     # Office suite, for reading and editing .docx/.xlsx/.pptx.
     #
     # Not OpenOffice: Apache OpenOffice has been effectively dormant for years

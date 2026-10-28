@@ -8,6 +8,11 @@ final: prev: {
   # Overrides nixpkgs' snap-based Termius with a build from the official .deb.
   termius = final.callPackage ./termius/package.nix { };
 
+  # Outlook: there is no Linux client from Microsoft and nothing in nixpkgs, so
+  # this packages the same unofficial Electron wrapper that was installed as a
+  # snap on the Ubuntu machine. See the file for the trade-offs.
+  outlook-ew = final.callPackage ./outlook-ew/package.nix { };
+
   # Signal Desktop carries a hard expiry: roughly 90 days after its build date
   # it refuses to start ("this version has expired"). Pinning it to the stable
   # channel therefore does not just mean missing features, it means the program
