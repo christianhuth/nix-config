@@ -42,7 +42,7 @@
               "applications:spotify.desktop"
               "preferred://browser" # Firefox, see system/packages.nix
               "applications:thunderbird.desktop"
-              "applications:outlook-ew.desktop"
+              "applications:outlook.desktop"
               "applications:signal.desktop"
               "applications:teams-for-linux.desktop"
               "applications:org.kde.konsole.desktop"
