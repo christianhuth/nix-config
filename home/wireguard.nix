@@ -240,6 +240,23 @@ in
 
     # Also exposed as a command so a newly dropped .conf can be picked up
     # without a full `home-manager switch`.
+    #
+    # On NixOS that is not a convenience, it is the only reliable way. Home
+    # Manager runs there as a systemd unit with
+    #
+    #   Type=oneshot  RemainAfterExit=yes  stopIfChanged=false
+    #
+    # so once it has run it stays "active (exited)", and `nixos-rebuild switch`
+    # only restarts it when the unit definition changed -- which means when the
+    # home-manager *generation* path in ExecStart changed. The tunnel
+    # configurations live outside Nix by design, so dropping a new .conf changes
+    # no generation, the unit is not restarted, and the import never runs. The
+    # activation log then keeps showing whatever it printed the last time it
+    # actually ran, which is a convincing way to look like a broken importer:
+    # "no *.conf files in ~/.wireguard" can be days old.
+    #
+    # So: after adding or changing a .conf, run `wireguard-nm-import`. To force
+    # the activation itself, `systemctl restart home-manager-<user>.service`.
     importer
   ];
 
