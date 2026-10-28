@@ -161,7 +161,22 @@
                 # easy-to-forget root switch from Ubuntu is gone.
                 users =
                   lib.mapAttrs (name: features: {
-                    imports = [ ./home/default.nix ] ++ map featureModule features;
+                    # Shared base, the features this user picked on this machine,
+                    # and -- if it exists -- that machine's own per-user settings.
+                    #
+                    # hosts/<hostname>/home.nix is the place for Home Manager
+                    # configuration that belongs to the *hardware* rather than to a
+                    # user or a feature: touchpad device ids, display scaling,
+                    # keyboard layout. Those cannot be features, because a feature is
+                    # meant to be reusable across machines, and they do not belong in
+                    # home/ for the same reason. Optional, so a host without quirks
+                    # needs no such file.
+                    imports =
+                      [ ./home/default.nix ]
+                      ++ map featureModule features
+                      ++ lib.optional (builtins.pathExists (./hosts + "/${hostname}/home.nix")) (
+                        ./hosts + "/${hostname}/home.nix"
+                      );
 
                     # The right name for *this* user. Home Manager's NixOS module
                     # also derives home.username and home.homeDirectory from
