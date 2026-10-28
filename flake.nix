@@ -22,6 +22,14 @@
       url = "github:nix-community/nix-vscode-extensions";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Declarative KDE Plasma settings for Home Manager -- NixOS only, the
+    # Ubuntu machine runs GNOME. Used by home/features/plasma.nix.
+    plasma-manager = {
+      url = "github:nix-community/plasma-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
+    };
   };
 
   outputs =
@@ -30,6 +38,7 @@
       nixpkgs-unstable,
       home-manager,
       nix-vscode-extensions,
+      plasma-manager,
       ...
     }:
     let
@@ -139,6 +148,13 @@
                 # the standalone Ubuntu output, which has exactly one user, passes
                 # it as a specialArg.
                 extraSpecialArgs.isNixOS = true;
+
+                # Makes the programs.plasma.* options available to every user.
+                # Only declares them -- nothing changes until a module sets
+                # programs.plasma.enable, which home/features/plasma.nix does.
+                # Not imported from that feature itself, because a feature
+                # module has no access to the flake inputs.
+                sharedModules = [ plasma-manager.homeModules.plasma-manager ];
 
                 # Every user gets the shared base plus their own features. All
                 # users in ONE `nixos-rebuild switch` -- the separate,
